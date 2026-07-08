@@ -1,0 +1,21 @@
+name: Prepare Weekly Dependency Release
+description: Check whether a branch is ready for an automated dependency release.
+
+inputs:
+  github-token:
+    description: Token used to read releases, compare commits, and inspect tags.
+    required: true
+  branch:
+    description: Branch to inspect.
+    required: false
+    default: main
+
+outputs:
+  should_release:
+    description: Whether a new GitHub release should be created.
+  next_tag:
+    description: The next patch tag to release.
+
+runs:
+  using: node24
+  main: dist/index.js

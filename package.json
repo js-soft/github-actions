@@ -1,0 +1,19 @@
+{
+    "name": "@js-soft/github-actions",
+    "private": true,
+    "scripts": {
+        "build": "npm run build:prepare-weekly-dependency-release",
+        "build:prepare-weekly-dependency-release": "ncc build prepare-weekly-dependency-release/src/index.ts -o prepare-weekly-dependency-release/dist --target es2024",
+        "lint": "npm run lint:prettier && npm run lint:tsc",
+        "lint:prettier": "prettier --check .",
+        "lint:tsc": "tsc -p prepare-weekly-dependency-release/tsconfig.json --noEmit"
+    },
+    "devDependencies": {
+        "@actions/core": "^3.0.1",
+        "@actions/github": "^9.1.1",
+        "@types/node": "^25.9.1",
+        "@vercel/ncc": "^0.44.1",
+        "prettier": "^3.8.3",
+        "typescript": "^5.9.3"
+    }
+}

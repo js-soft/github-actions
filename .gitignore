@@ -1,0 +1,4 @@
+node_modules
+dist
+!prepare-weekly-dependency-release/dist
+!prepare-weekly-dependency-release/dist/**
