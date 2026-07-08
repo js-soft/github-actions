@@ -1,0 +1,34 @@
+name: Automatic Dependency Release
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: Branch to inspect and release from.
+        required: false
+        type: string
+        default: main
+    secrets:
+      github-token:
+        description: Token used to read commits and create the release.
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: js-soft/github-actions
+          ref: main
+          token: ${{ secrets.github-token }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: current
+
+      - run: npm ci
+      - run: npm run prepare-dependency-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.github-token }}
+          RELEASE_BRANCH: ${{ inputs.branch }}

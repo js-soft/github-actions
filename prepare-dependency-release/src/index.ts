@@ -26,8 +26,8 @@ run().catch((error: unknown) => {
 async function run() {
     core.setOutput("should_release", "false")
 
-    const token = core.getInput("github-token", { required: true })
-    const branchInput = core.getInput("branch")
+    const token = getRequiredEnv("GITHUB_TOKEN")
+    const branchInput = process.env.RELEASE_BRANCH ?? ""
     const branch = branchInput.length > 0 ? branchInput : "main"
     const { owner, repo } = github.context.repo
     const octokit = github.getOctokit(token)
@@ -65,6 +65,14 @@ async function run() {
 
     core.debug(`Checked ${revisionDescription}: ${commitCount} commits.`)
     core.notice(`Creating ${nextTag} from ${commitCount} dependency-bot commit(s).`)
+    await octokit.rest.repos.createRelease({
+        owner,
+        repo,
+        ["tag_name"]: nextTag,
+        name: nextTag,
+        ["target_commitish"]: branch,
+        ["generate_release_notes"]: true
+    })
     core.setOutput("next_tag", nextTag)
     core.setOutput("should_release", "true")
 }
@@ -223,4 +231,13 @@ function isDependencyBotCommit(commit: ReleaseCommit) {
 
 function hasStatus(error: unknown, status: number) {
     return error instanceof Error && "status" in error && error.status === status
+}
+
+function getRequiredEnv(name: string) {
+    const value = process.env[name]
+    if (!value) {
+        throw new Error(`${name} is not set.`)
+    }
+
+    return value
 }

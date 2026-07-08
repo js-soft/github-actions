@@ -2,25 +2,26 @@
 
 Reusable GitHub Actions for js-soft repositories.
 
-## prepare-weekly-dependency-release
+## automatic-dependency-release
 
-Checks whether all commits on a branch since the latest GitHub release were authored by Renovate or Dependabot. If no latest GitHub release exists, it checks all commits on the branch instead. If all checked commits are dependency-bot commits, it outputs the next patch tag for a dependency-only release.
+Checks whether all commits on a branch since the latest GitHub release were authored by Renovate or Dependabot. If no latest GitHub release exists, it checks all commits on the branch instead. If all checked commits are dependency-bot commits, it creates a GitHub release with generated release notes.
 
 ```yaml
-- name: Check dependency-only changes
-  id: prepare
-  uses: js-soft/github-actions/prepare-weekly-dependency-release@main
-  with:
-      github-token: ${{ github.token }}
-      branch: main
+jobs:
+    release:
+        uses: js-soft/github-actions/.github/workflows/automatic-dependency-release.yml@main
+        with:
+            branch: main
+        secrets:
+            github-token: ${{ secrets.GH_PAT }}
 ```
 
-Outputs:
+The first release is created as `0.1.0`. Later releases increment the latest release's patch version.
 
-- `should_release`: `true` when a new release should be created.
-- `next_tag`: the next patch tag to release. If there is no latest GitHub release, this is `0.1.0`.
+Secrets:
+
+- `github-token`: token used to read commits and create the release. Use a PAT when the created release should trigger follow-up workflows.
 
 Inputs:
 
-- `github-token`: token used to read releases, compare commits, and inspect tags.
-- `branch`: branch to inspect. Defaults to `main`.
+- `branch`: branch to inspect and release from. Defaults to `main`.

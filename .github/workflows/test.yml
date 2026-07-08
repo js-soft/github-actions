@@ -13,5 +13,3 @@ jobs:
           node-version: current
       - run: npm ci
       - run: npm run lint
-      - run: npm run build
-      - run: git diff --exit-code
