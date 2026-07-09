@@ -12,6 +12,7 @@ const patchVersionPattern = /^(v?)(\d+)\.(\d+)\.(\d+)$/
 
 const botAuthorLogins = new Set(["renovate[bot]", "dependabot[bot]"])
 const botAuthorNames = new Set(["renovate bot", "renovate[bot]", "dependabot[bot]", "dependabot"])
+const ignoredPullRequestLabels = new Set(["test", "chore", "refactoring", "ci"])
 const botEmailFragments = [
     "renovate[bot]@users.noreply.github.com",
     "bot@renovateapp.com",
@@ -42,7 +43,7 @@ async function run() {
     }
 
     const { commitCount, commits, nextTag, revisionDescription } = releasePreparation
-    const nonDependencyBotCommits = commits.filter((commit) => !isDependencyBotCommit(commit))
+    const nonDependencyBotCommits = await getNonDependencyBotCommits(octokit, owner, repo, commits)
     if (nonDependencyBotCommits.length > 0) {
         const commitList = nonDependencyBotCommits
             .slice(0, 10)
@@ -214,6 +215,20 @@ async function listCommits(octokit: Octokit, owner: string, repo: string, branch
     })
 }
 
+async function getNonDependencyBotCommits(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
+    const nonDependencyBotCommits = []
+
+    for (const commit of commits) {
+        if (isDependencyBotCommit(commit) || (await isIgnoredPullRequestCommit(octokit, owner, repo, commit))) {
+            continue
+        }
+
+        nonDependencyBotCommits.push(commit)
+    }
+
+    return nonDependencyBotCommits
+}
+
 function isDependencyBotCommit(commit: ReleaseCommit) {
     const login = commit.author?.login.toLowerCase()
     if (login && botAuthorLogins.has(login)) {
@@ -227,6 +242,18 @@ function isDependencyBotCommit(commit: ReleaseCommit) {
 
     const authorEmail = commit.commit.author?.email?.toLowerCase()
     return Boolean(authorEmail && botEmailFragments.some((fragment) => authorEmail.includes(fragment)))
+}
+
+async function isIgnoredPullRequestCommit(octokit: Octokit, owner: string, repo: string, commit: ReleaseCommit) {
+    const { data: pullRequests } = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+        owner,
+        repo,
+        ["commit_sha"]: commit.sha
+    })
+
+    return pullRequests.some((pullRequest) =>
+        pullRequest.labels.some((label) => ignoredPullRequestLabels.has(label.name.toLowerCase()))
+    )
 }
 
 async function tagExists(octokit: Octokit, owner: string, repo: string, tag: string) {
