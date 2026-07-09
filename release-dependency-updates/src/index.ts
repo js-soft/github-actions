@@ -77,6 +77,15 @@ async function run() {
     core.setOutput("should_release", "true")
 }
 
+function getRequiredEnv(name: string) {
+    const value = process.env[name]
+    if (!value) {
+        throw new Error(`${name} is not set.`)
+    }
+
+    return value
+}
+
 async function getLatestRelease(octokit: Octokit, owner: string, repo: string) {
     try {
         const { data } = await octokit.rest.repos.getLatestRelease({ owner, repo })
@@ -88,6 +97,10 @@ async function getLatestRelease(octokit: Octokit, owner: string, repo: string) {
 
         throw error
     }
+}
+
+function hasStatus(error: unknown, status: number) {
+    return error instanceof Error && "status" in error && error.status === status
 }
 
 async function prepareReleaseAfterLatestRelease(
@@ -120,22 +133,6 @@ async function prepareReleaseAfterLatestRelease(
         commits,
         nextTag,
         revisionDescription: `${latestTag}...${branch}`
-    }
-}
-
-async function prepareInitialRelease(octokit: Octokit, owner: string, repo: string, branch: string) {
-    core.notice(`No latest GitHub release found. Checking all commits on ${branch}.`)
-    const commits = await listCommits(octokit, owner, repo, branch)
-    if (commits.length === 0) {
-        core.notice(`No commits found on ${branch}.`)
-        return undefined
-    }
-
-    return {
-        commitCount: commits.length,
-        commits,
-        nextTag: initialVersion,
-        revisionDescription: `all commits on ${branch}`
     }
 }
 
@@ -173,15 +170,6 @@ async function compareCommits(octokit: Octokit, owner: string, repo: string, bas
     return { commits, comparison }
 }
 
-async function listCommits(octokit: Octokit, owner: string, repo: string, branch: string) {
-    return await octokit.paginate(octokit.rest.repos.listCommits, {
-        owner,
-        repo,
-        sha: branch,
-        ["per_page"]: 100
-    })
-}
-
 async function getComparePage(
     octokit: Octokit,
     owner: string,
@@ -201,17 +189,29 @@ async function getComparePage(
     return data
 }
 
-async function tagExists(octokit: Octokit, owner: string, repo: string, tag: string) {
-    try {
-        await octokit.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })
-        return true
-    } catch (error) {
-        if (hasStatus(error, 404)) {
-            return false
-        }
-
-        throw error
+async function prepareInitialRelease(octokit: Octokit, owner: string, repo: string, branch: string) {
+    core.notice(`No latest GitHub release found. Checking all commits on ${branch}.`)
+    const commits = await listCommits(octokit, owner, repo, branch)
+    if (commits.length === 0) {
+        core.notice(`No commits found on ${branch}.`)
+        return undefined
     }
+
+    return {
+        commitCount: commits.length,
+        commits,
+        nextTag: initialVersion,
+        revisionDescription: `all commits on ${branch}`
+    }
+}
+
+async function listCommits(octokit: Octokit, owner: string, repo: string, branch: string) {
+    return await octokit.paginate(octokit.rest.repos.listCommits, {
+        owner,
+        repo,
+        sha: branch,
+        ["per_page"]: 100
+    })
 }
 
 function isDependencyBotCommit(commit: ReleaseCommit) {
@@ -229,15 +229,15 @@ function isDependencyBotCommit(commit: ReleaseCommit) {
     return Boolean(authorEmail && botEmailFragments.some((fragment) => authorEmail.includes(fragment)))
 }
 
-function hasStatus(error: unknown, status: number) {
-    return error instanceof Error && "status" in error && error.status === status
-}
+async function tagExists(octokit: Octokit, owner: string, repo: string, tag: string) {
+    try {
+        await octokit.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })
+        return true
+    } catch (error) {
+        if (hasStatus(error, 404)) {
+            return false
+        }
 
-function getRequiredEnv(name: string) {
-    const value = process.env[name]
-    if (!value) {
-        throw new Error(`${name} is not set.`)
+        throw error
     }
-
-    return value
 }
