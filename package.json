@@ -1,11 +1,12 @@
 {
     "name": "@js-soft/github-actions",
     "private": true,
+    "type": "module",
     "scripts": {
         "lint": "npm run lint:prettier && npm run lint:tsc",
         "lint:prettier": "prettier --check .",
-        "lint:tsc": "tsc -p prepare-dependency-release/tsconfig.json --noEmit",
-        "prepare-dependency-release": "tsx prepare-dependency-release/src/index.ts"
+        "lint:tsc": "tsc -p release-dependency-updates/tsconfig.json --noEmit",
+        "release-dependency-updates": "node --import tsx release-dependency-updates/src/index.ts"
     },
     "dependencies": {
         "@actions/core": "^3.0.1",

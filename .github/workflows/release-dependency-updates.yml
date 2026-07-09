@@ -1,4 +1,4 @@
-name: Automatic Dependency Release
+name: Release Dependency Updates
 
 on:
   workflow_call:
@@ -28,7 +28,7 @@ jobs:
           node-version: current
 
       - run: npm ci
-      - run: npm run prepare-dependency-release
+      - run: npm run release-dependency-updates
         env:
           GITHUB_TOKEN: ${{ secrets.github-token }}
           RELEASE_BRANCH: ${{ inputs.branch }}

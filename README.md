@@ -2,14 +2,14 @@
 
 Reusable GitHub Actions for js-soft repositories.
 
-## automatic-dependency-release
+## release-dependency-updates
 
 Checks whether all commits on a branch since the latest GitHub release were authored by Renovate or Dependabot. If no latest GitHub release exists, it checks all commits on the branch instead. If all checked commits are dependency-bot commits, it creates a GitHub release with generated release notes.
 
 ```yaml
 jobs:
     release:
-        uses: js-soft/github-actions/.github/workflows/automatic-dependency-release.yml@main
+        uses: js-soft/github-actions/.github/workflows/release-dependency-updates.yml@main
         with:
             branch: main
         secrets:
