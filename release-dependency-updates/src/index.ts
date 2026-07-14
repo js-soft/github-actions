@@ -50,7 +50,7 @@ async function run() {
             .map((commit) => `- ${commit.sha.slice(0, 7)} ${commit.commit.message.split("\n")[0]}`)
             .join("\n")
 
-        core.setFailed(
+        core.notice(
             [
                 `Found ${nonDependencyBotCommits.length} commit(s) in ${revisionDescription} that were not authored by Renovate or Dependabot.`,
                 commitList
