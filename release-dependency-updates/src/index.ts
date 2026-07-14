@@ -1,25 +1,14 @@
 import * as core from "@actions/core"
 import * as github from "@actions/github"
+import type { RestEndpointMethodTypes } from "@octokit/plugin-rest-endpoint-methods"
+
+import { checkReleaseCommits, type ReleaseCheckCommit, type ReleaseCommit } from "./release-check.js"
 
 type Octokit = ReturnType<typeof github.getOctokit>
-type CompareResponse = Awaited<ReturnType<Octokit["rest"]["repos"]["compareCommitsWithBasehead"]>>["data"]
-type ListedCommit = Awaited<ReturnType<Octokit["rest"]["repos"]["listCommits"]>>["data"][number]
-type ReleaseCommit = CompareResponse["commits"][number] | ListedCommit
-type LatestRelease = Awaited<ReturnType<Octokit["rest"]["repos"]["getLatestRelease"]>>["data"]
+type LatestRelease = RestEndpointMethodTypes["repos"]["getLatestRelease"]["response"]["data"]
 
 const initialVersion = "0.1.0"
 const patchVersionPattern = /^(v?)(\d+)\.(\d+)\.(\d+)$/
-
-const botAuthorLogins = new Set(["renovate[bot]", "dependabot[bot]"])
-const botAuthorNames = new Set(["renovate bot", "renovate[bot]", "dependabot[bot]", "dependabot"])
-const dependencyPullRequestLabels = new Set(["dependencies"])
-const maintenancePullRequestLabels = new Set(["test", "chore", "refactoring", "ci"])
-const botEmailFragments = [
-    "renovate[bot]@users.noreply.github.com",
-    "bot@renovateapp.com",
-    "dependabot[bot]@users.noreply.github.com",
-    "dependabot@github.com"
-]
 
 run().catch((error: unknown) => {
     core.setFailed(error instanceof Error ? error.message : String(error))
@@ -44,7 +33,7 @@ async function run() {
     }
 
     const { commitCount, commits, nextTag, revisionDescription } = releasePreparation
-    const { blockingCommits, hasDependencyUpdateCommit } = await checkReleaseCommits(octokit, owner, repo, commits)
+    const { blockingCommits, hasDependencyUpdateCommit } = await getReleaseCheck(octokit, owner, repo, commits)
     if (blockingCommits.length > 0) {
         const commitList = blockingCommits
             .slice(0, 10)
@@ -223,49 +212,25 @@ async function listCommits(octokit: Octokit, owner: string, repo: string, branch
     })
 }
 
-async function checkReleaseCommits(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
-    const blockingCommits = []
-    let hasDependencyUpdateCommit = false
-
-    for (const commit of commits) {
-        const pullRequestLabels = await getAssociatedPullRequestLabels(octokit, owner, repo, commit)
-
-        if (isDependencyUpdateCommit(commit, pullRequestLabels)) {
-            hasDependencyUpdateCommit = true
-            continue
-        }
-
-        if (isMaintenanceCommit(pullRequestLabels)) {
-            continue
-        }
-
-        blockingCommits.push(commit)
-    }
+async function getReleaseCheck(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
+    const releaseCheckCommits = await getReleaseCheckCommits(octokit, owner, repo, commits)
+    const { blockingCommits, hasDependencyUpdateCommit } = checkReleaseCommits(releaseCheckCommits)
 
     return { blockingCommits, hasDependencyUpdateCommit }
 }
 
-function isDependencyUpdateCommit(commit: ReleaseCommit, pullRequestLabels: string[]) {
-    return isDependencyBotCommit(commit) || hasPullRequestLabel(pullRequestLabels, dependencyPullRequestLabels)
-}
+async function getReleaseCheckCommits(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
+    const releaseCheckCommits: Array<ReleaseCommit & ReleaseCheckCommit> = []
 
-function isMaintenanceCommit(pullRequestLabels: string[]) {
-    return hasPullRequestLabel(pullRequestLabels, maintenancePullRequestLabels)
-}
-
-function isDependencyBotCommit(commit: ReleaseCommit) {
-    const login = commit.author?.login.toLowerCase()
-    if (login && botAuthorLogins.has(login)) {
-        return true
+    for (const commit of commits) {
+        const pullRequestLabels = await getAssociatedPullRequestLabels(octokit, owner, repo, commit)
+        releaseCheckCommits.push({
+            ...commit,
+            pullRequestLabels
+        })
     }
 
-    const authorName = commit.commit.author?.name?.toLowerCase()
-    if (authorName && botAuthorNames.has(authorName)) {
-        return true
-    }
-
-    const authorEmail = commit.commit.author?.email?.toLowerCase()
-    return Boolean(authorEmail && botEmailFragments.some((fragment) => authorEmail.includes(fragment)))
+    return releaseCheckCommits
 }
 
 async function getAssociatedPullRequestLabels(octokit: Octokit, owner: string, repo: string, commit: ReleaseCommit) {
@@ -276,10 +241,6 @@ async function getAssociatedPullRequestLabels(octokit: Octokit, owner: string, r
     })
 
     return pullRequests.flatMap((pullRequest) => pullRequest.labels.map((label) => label.name.toLowerCase()))
-}
-
-function hasPullRequestLabel(labelNames: string[], matchingLabels: Set<string>) {
-    return labelNames.some((labelName) => matchingLabels.has(labelName))
 }
 
 async function tagExists(octokit: Octokit, owner: string, repo: string, tag: string) {

@@ -6,6 +6,7 @@
         "lint": "npm run lint:prettier && npm run lint:tsc",
         "lint:prettier": "prettier --check .",
         "lint:tsc": "tsc -p release-dependency-updates/tsconfig.json --noEmit",
+        "test": "node --import tsx --test release-dependency-updates/src/*.test.ts",
         "release-dependency-updates": "node --import tsx release-dependency-updates/src/index.ts"
     },
     "dependencies": {
@@ -13,6 +14,7 @@
         "@actions/github": "^9.1.1"
     },
     "devDependencies": {
+        "@octokit/plugin-rest-endpoint-methods": "^17.0.0",
         "@types/node": "^25.9.1",
         "prettier": "^3.8.3",
         "tsx": "^4.21.0",
