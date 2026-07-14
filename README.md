@@ -9,18 +9,31 @@ Checks whether commits on a branch since the latest GitHub release contain at le
 ```yaml
 jobs:
     release:
+        permissions:
+            contents: write
+            pull-requests: read
         uses: js-soft/github-actions/.github/workflows/release-dependency-updates.yml@main
         with:
             branch: main
         secrets:
-            github-token: ${{ secrets.GH_PAT }}
+            github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 The first release is created as `0.1.0`. Later releases increment the latest release's patch version.
 
 Secrets:
 
-- `github-token`: token used to read commits and create the release. Use a PAT when the created release should trigger follow-up workflows.
+- `github-token`: token used to read commits, read associated pull request labels, and create the release. `GITHUB_TOKEN` is enough when the caller job grants `contents: write` and `pull-requests: read`. Use a PAT or GitHub App token instead when the created release should trigger follow-up workflows.
+
+Fine-grained PAT permissions:
+
+- Repository access: the caller repository.
+- Repository permissions: `Contents` read/write and `Pull requests` read.
+
+Classic PAT scopes:
+
+- `repo` for private repositories.
+- `public_repo` for public repositories.
 
 Inputs:
 
