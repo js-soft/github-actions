@@ -4,7 +4,7 @@ Reusable GitHub Actions for js-soft repositories.
 
 ## release-dependency-updates
 
-Checks whether all commits on a branch since the latest GitHub release were authored by Renovate or Dependabot, or are associated with pull requests labeled `dependencies`, `test`, `chore`, `refactoring`, or `ci`. If no latest GitHub release exists, it checks all commits on the branch instead. If all checked commits are releasable commits, it creates a GitHub release with generated release notes.
+Checks whether commits on a branch since the latest GitHub release contain at least one dependency update commit and no blocking commits. Dependency update commits are authored by Renovate or Dependabot, or are associated with a pull request labeled `dependencies`. Commits associated with pull requests labeled `test`, `chore`, `refactoring`, or `ci` are allowed alongside dependency updates, but do not trigger a release by themselves. If no latest GitHub release exists, it checks all commits on the branch instead. If the checked commits pass, it creates a GitHub release with generated release notes.
 
 ```yaml
 jobs:

@@ -12,7 +12,8 @@ const patchVersionPattern = /^(v?)(\d+)\.(\d+)\.(\d+)$/
 
 const botAuthorLogins = new Set(["renovate[bot]", "dependabot[bot]"])
 const botAuthorNames = new Set(["renovate bot", "renovate[bot]", "dependabot[bot]", "dependabot"])
-const releasablePullRequestLabels = new Set(["test", "chore", "refactoring", "ci", "dependencies"])
+const dependencyPullRequestLabels = new Set(["dependencies"])
+const maintenancePullRequestLabels = new Set(["test", "chore", "refactoring", "ci"])
 const botEmailFragments = [
     "renovate[bot]@users.noreply.github.com",
     "bot@renovateapp.com",
@@ -43,18 +44,25 @@ async function run() {
     }
 
     const { commitCount, commits, nextTag, revisionDescription } = releasePreparation
-    const nonReleasableCommits = await getNonReleasableCommits(octokit, owner, repo, commits)
-    if (nonReleasableCommits.length > 0) {
-        const commitList = nonReleasableCommits
+    const { blockingCommits, hasDependencyUpdateCommit } = await checkReleaseCommits(octokit, owner, repo, commits)
+    if (blockingCommits.length > 0) {
+        const commitList = blockingCommits
             .slice(0, 10)
             .map((commit) => `- ${commit.sha.slice(0, 7)} ${commit.commit.message.split("\n")[0]}`)
             .join("\n")
 
         core.notice(
             [
-                `Found ${nonReleasableCommits.length} commit(s) in ${revisionDescription} that were not authored by Renovate or Dependabot and do not have a releasable pull request label.`,
+                `Found ${blockingCommits.length} commit(s) in ${revisionDescription} that were not authored by Renovate or Dependabot and do not have a releasable pull request label.`,
                 commitList
             ].join("\n")
+        )
+        return
+    }
+
+    if (!hasDependencyUpdateCommit) {
+        core.notice(
+            `Found no dependency update commits in ${revisionDescription}. A new tag is only created when there is at least one dependency update commit.`
         )
         return
     }
@@ -215,18 +223,34 @@ async function listCommits(octokit: Octokit, owner: string, repo: string, branch
     })
 }
 
-async function getNonReleasableCommits(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
-    const nonReleasableCommits = []
+async function checkReleaseCommits(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
+    const blockingCommits = []
+    let hasDependencyUpdateCommit = false
 
     for (const commit of commits) {
-        if (isDependencyBotCommit(commit) || (await hasReleasablePullRequestLabel(octokit, owner, repo, commit))) {
+        const pullRequestLabels = await getAssociatedPullRequestLabels(octokit, owner, repo, commit)
+
+        if (isDependencyUpdateCommit(commit, pullRequestLabels)) {
+            hasDependencyUpdateCommit = true
             continue
         }
 
-        nonReleasableCommits.push(commit)
+        if (isMaintenanceCommit(pullRequestLabels)) {
+            continue
+        }
+
+        blockingCommits.push(commit)
     }
 
-    return nonReleasableCommits
+    return { blockingCommits, hasDependencyUpdateCommit }
+}
+
+function isDependencyUpdateCommit(commit: ReleaseCommit, pullRequestLabels: string[]) {
+    return isDependencyBotCommit(commit) || hasPullRequestLabel(pullRequestLabels, dependencyPullRequestLabels)
+}
+
+function isMaintenanceCommit(pullRequestLabels: string[]) {
+    return hasPullRequestLabel(pullRequestLabels, maintenancePullRequestLabels)
 }
 
 function isDependencyBotCommit(commit: ReleaseCommit) {
@@ -244,16 +268,18 @@ function isDependencyBotCommit(commit: ReleaseCommit) {
     return Boolean(authorEmail && botEmailFragments.some((fragment) => authorEmail.includes(fragment)))
 }
 
-async function hasReleasablePullRequestLabel(octokit: Octokit, owner: string, repo: string, commit: ReleaseCommit) {
+async function getAssociatedPullRequestLabels(octokit: Octokit, owner: string, repo: string, commit: ReleaseCommit) {
     const { data: pullRequests } = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
         owner,
         repo,
         ["commit_sha"]: commit.sha
     })
 
-    return pullRequests.some((pullRequest) =>
-        pullRequest.labels.some((label) => releasablePullRequestLabels.has(label.name.toLowerCase()))
-    )
+    return pullRequests.flatMap((pullRequest) => pullRequest.labels.map((label) => label.name.toLowerCase()))
+}
+
+function hasPullRequestLabel(labelNames: string[], matchingLabels: Set<string>) {
+    return labelNames.some((labelName) => matchingLabels.has(labelName))
 }
 
 async function tagExists(octokit: Octokit, owner: string, repo: string, tag: string) {
