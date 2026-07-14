@@ -12,7 +12,7 @@ const patchVersionPattern = /^(v?)(\d+)\.(\d+)\.(\d+)$/
 
 const botAuthorLogins = new Set(["renovate[bot]", "dependabot[bot]"])
 const botAuthorNames = new Set(["renovate bot", "renovate[bot]", "dependabot[bot]", "dependabot"])
-const ignoredPullRequestLabels = new Set(["test", "chore", "refactoring", "ci"])
+const releasablePullRequestLabels = new Set(["test", "chore", "refactoring", "ci", "dependencies"])
 const botEmailFragments = [
     "renovate[bot]@users.noreply.github.com",
     "bot@renovateapp.com",
@@ -43,16 +43,16 @@ async function run() {
     }
 
     const { commitCount, commits, nextTag, revisionDescription } = releasePreparation
-    const nonDependencyBotCommits = await getNonDependencyBotCommits(octokit, owner, repo, commits)
-    if (nonDependencyBotCommits.length > 0) {
-        const commitList = nonDependencyBotCommits
+    const nonReleasableCommits = await getNonReleasableCommits(octokit, owner, repo, commits)
+    if (nonReleasableCommits.length > 0) {
+        const commitList = nonReleasableCommits
             .slice(0, 10)
             .map((commit) => `- ${commit.sha.slice(0, 7)} ${commit.commit.message.split("\n")[0]}`)
             .join("\n")
 
         core.notice(
             [
-                `Found ${nonDependencyBotCommits.length} commit(s) in ${revisionDescription} that were not authored by Renovate or Dependabot.`,
+                `Found ${nonReleasableCommits.length} commit(s) in ${revisionDescription} that were not authored by Renovate or Dependabot and do not have a releasable pull request label.`,
                 commitList
             ].join("\n")
         )
@@ -65,7 +65,7 @@ async function run() {
     }
 
     core.debug(`Checked ${revisionDescription}: ${commitCount} commits.`)
-    core.notice(`Creating ${nextTag} from ${commitCount} dependency-bot commit(s).`)
+    core.notice(`Creating ${nextTag} from ${commitCount} releasable commit(s).`)
     await octokit.rest.repos.createRelease({
         owner,
         repo,
@@ -215,18 +215,18 @@ async function listCommits(octokit: Octokit, owner: string, repo: string, branch
     })
 }
 
-async function getNonDependencyBotCommits(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
-    const nonDependencyBotCommits = []
+async function getNonReleasableCommits(octokit: Octokit, owner: string, repo: string, commits: ReleaseCommit[]) {
+    const nonReleasableCommits = []
 
     for (const commit of commits) {
-        if (isDependencyBotCommit(commit) || (await isIgnoredPullRequestCommit(octokit, owner, repo, commit))) {
+        if (isDependencyBotCommit(commit) || (await hasReleasablePullRequestLabel(octokit, owner, repo, commit))) {
             continue
         }
 
-        nonDependencyBotCommits.push(commit)
+        nonReleasableCommits.push(commit)
     }
 
-    return nonDependencyBotCommits
+    return nonReleasableCommits
 }
 
 function isDependencyBotCommit(commit: ReleaseCommit) {
@@ -244,7 +244,7 @@ function isDependencyBotCommit(commit: ReleaseCommit) {
     return Boolean(authorEmail && botEmailFragments.some((fragment) => authorEmail.includes(fragment)))
 }
 
-async function isIgnoredPullRequestCommit(octokit: Octokit, owner: string, repo: string, commit: ReleaseCommit) {
+async function hasReleasablePullRequestLabel(octokit: Octokit, owner: string, repo: string, commit: ReleaseCommit) {
     const { data: pullRequests } = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
         owner,
         repo,
@@ -252,7 +252,7 @@ async function isIgnoredPullRequestCommit(octokit: Octokit, owner: string, repo:
     })
 
     return pullRequests.some((pullRequest) =>
-        pullRequest.labels.some((label) => ignoredPullRequestLabels.has(label.name.toLowerCase()))
+        pullRequest.labels.some((label) => releasablePullRequestLabels.has(label.name.toLowerCase()))
     )
 }
 
