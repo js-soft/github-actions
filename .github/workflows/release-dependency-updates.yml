@@ -21,7 +21,6 @@ jobs:
         with:
           repository: js-soft/github-actions
           ref: main
-          token: ${{ secrets.github-token }}
 
       - uses: actions/setup-node@v6
         with:
