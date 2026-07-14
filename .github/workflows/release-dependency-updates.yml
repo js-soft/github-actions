@@ -17,17 +17,22 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout github-actions repository
+        uses: actions/checkout@v6
         with:
           repository: js-soft/github-actions
           ref: main
 
-      - uses: actions/setup-node@v6
+      - name: Setup nodejs
+        uses: actions/setup-node@v6
         with:
           node-version: current
 
-      - run: npm ci
-      - run: npm run release-dependency-updates
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create release for dependency updates
+        run: npm run release-dependency-updates
         env:
           GITHUB_TOKEN: ${{ secrets.github-token }}
           RELEASE_BRANCH: ${{ inputs.branch }}
