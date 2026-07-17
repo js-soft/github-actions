@@ -1,0 +1,53 @@
+name: Validate pull request label
+description: Validates that a pull request has at least one accepted label.
+
+inputs:
+  valid-labels:
+    description: Comma-separated list of labels that are accepted for pull requests.
+    required: false
+    default: breaking-change, bug, chore, ci, dependencies, documentation, enhancement, refactoring, test
+
+runs:
+  using: composite
+  steps:
+    - name: Validate labels
+      shell: bash
+      env:
+        VALID_LABELS: ${{ inputs.valid-labels }}
+        EVENT_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+      run: |
+        set -euo pipefail
+
+        trim() {
+          local value="$1"
+          value="${value#"${value%%[![:space:]]*}"}"
+          value="${value%"${value##*[![:space:]]}"}"
+          printf '%s' "$value"
+        }
+
+        labels="$EVENT_LABELS"
+
+        if [ -z "$(trim "$labels")" ]; then
+          echo "::error::The pull request must have one of these labels: $VALID_LABELS"
+          exit 1
+        fi
+
+        IFS=',' read -ra valid_labels <<< "$VALID_LABELS"
+        IFS=',' read -ra pr_labels <<< "$labels"
+
+        for pr_label in "${pr_labels[@]}"; do
+          pr_label="$(trim "$pr_label")"
+
+          for valid_label in "${valid_labels[@]}"; do
+            valid_label="$(trim "$valid_label")"
+
+            if [ "$pr_label" = "$valid_label" ]; then
+              echo "Pull request label '$pr_label' is accepted."
+              exit 0
+            fi
+          done
+        done
+
+        echo "::error::The pull request must have one of these labels: $VALID_LABELS"
+        echo "Current labels: $labels"
+        exit 1
