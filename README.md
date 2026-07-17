@@ -38,3 +38,21 @@ Classic PAT scopes:
 Inputs:
 
 - `branch`: branch to inspect and release from. Defaults to `main`.
+
+## validate-pr-label
+
+Validates that a pull request has at least one accepted label. By default, the
+accepted labels are `breaking-change`, `bug`, `chore`, `ci`, `dependencies`,
+`documentation`, `enhancement`, `refactoring`, and `test`.
+
+```yaml
+jobs:
+    validate-pr-label:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: js-soft/github-actions/validate-pr-label@main
+```
+
+Inputs:
+
+- `valid-labels`: comma-separated list of labels that are accepted for pull requests. Defaults to `breaking-change, bug, chore, ci, dependencies, documentation, enhancement, refactoring, test`.
