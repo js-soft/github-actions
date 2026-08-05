@@ -5,7 +5,7 @@
     "scripts": {
         "lint": "npm run lint:prettier && npm run lint:tsc",
         "lint:prettier": "prettier --check .",
-        "lint:tsc": "tsc -p release-dependency-updates/tsconfig.json --noEmit",
+        "lint:tsc": "tsc -p release-dependency-updates/tsconfig.json --noEmit && tsc -p handle-npm-audit/tsconfig.json --noEmit",
         "test": "node --import tsx --test release-dependency-updates/src/*.test.ts",
         "release-dependency-updates": "node --import tsx release-dependency-updates/src/index.ts"
     },

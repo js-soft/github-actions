@@ -79,9 +79,13 @@ jobs:
         with:
           node-version: ${{ inputs['node-version'] }}
 
+      - name: Install github-actions dependencies
+        working-directory: github-actions-repo
+        run: npm ci
+
       - name: Handle npm audit
         working-directory: target-repository
-        run: node ../github-actions-repo/handle-npm-audit/handleNpmAudit.mjs
+        run: ../github-actions-repo/node_modules/.bin/tsx ../github-actions-repo/handle-npm-audit/handleNpmAudit.ts
 
       - name: Check for changes
         id: changes

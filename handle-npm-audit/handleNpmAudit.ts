@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
 
 import { spawnSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
@@ -6,9 +6,21 @@ import { resolve } from "node:path"
 
 const nsprcPath = resolve(process.cwd(), ".nsprc")
 
+type AuditResult = {
+    output: string
+    status: number
+}
+
+type ExceptionUpdateResult = {
+    added: string[]
+    removed: string[]
+}
+
+type Nsprc = Record<string, unknown>
+
 handleNpmAudit()
 
-function handleNpmAudit() {
+function handleNpmAudit(): void {
     const firstAudit = runBetterNpmAudit()
     const newVulnerabilityIds = extractUnhandledVulnerabilityIds(firstAudit.output)
     const unusedExceptionIds = extractUnusedExceptionIds(firstAudit.output)
@@ -56,7 +68,7 @@ function handleNpmAudit() {
     }
 }
 
-function runBetterNpmAudit() {
+function runBetterNpmAudit(): AuditResult {
     const result = spawnSync("npx", ["--yes", "better-npm-audit", "audit"], {
         encoding: "utf8",
         shell: false
@@ -75,7 +87,7 @@ function runBetterNpmAudit() {
     return { output, status: result.status ?? 1 }
 }
 
-function runNpmAuditFix() {
+function runNpmAuditFix(): void {
     console.log("Running npm audit fix...")
 
     const result = spawnSync("npm", ["audit", "fix"], {
@@ -93,8 +105,8 @@ function runNpmAuditFix() {
     }
 }
 
-function extractUnhandledVulnerabilityIds(output) {
-    const ids = []
+function extractUnhandledVulnerabilityIds(output: string): string[] {
+    const ids: string[] = []
     const advisoryLines = output.matchAll(/Node security advisories:\s*([^\r\n]+)/gi)
 
     for (const advisoryLine of advisoryLines) {
@@ -104,8 +116,8 @@ function extractUnhandledVulnerabilityIds(output) {
     return Array.from(new Set(ids)).sort()
 }
 
-function extractUnusedExceptionIds(output) {
-    const ids = []
+function extractUnusedExceptionIds(output: string): string[] {
+    const ids: string[] = []
     const unusedExceptionLines = output.matchAll(
         /excluded vulnerabilities did not match any of the found vulnerabilities:\s*([^\r\n]+)/gi
     )
@@ -117,10 +129,10 @@ function extractUnusedExceptionIds(output) {
     return Array.from(new Set(ids)).sort()
 }
 
-function updateExceptionsInNsprc(ids, unusedIds) {
+function updateExceptionsInNsprc(ids: string[], unusedIds: string[]): ExceptionUpdateResult {
     const nsprc = readNsprc()
-    const added = []
-    const removed = []
+    const added: string[] = []
+    const removed: string[] = []
 
     for (const id of unusedIds) {
         if (!Object.hasOwn(nsprc, id)) continue
@@ -143,26 +155,44 @@ function updateExceptionsInNsprc(ids, unusedIds) {
     return { added, removed }
 }
 
-function readNsprc() {
+function readNsprc(): Nsprc {
     try {
-        return JSON.parse(readFileSync(nsprcPath, "utf8"))
+        const parsedNsprc: unknown = JSON.parse(readFileSync(nsprcPath, "utf8"))
+
+        if (!isNsprc(parsedNsprc)) {
+            throw new Error(".nsprc must contain a JSON object.")
+        }
+
+        return parsedNsprc
     } catch (error) {
-        if (error.code === "ENOENT") return {}
+        if (isNodeError(error) && error.code === "ENOENT") return {}
         throw error
     }
 }
 
-function isActiveException(exception) {
-    if (exception === undefined) return false
-    if (typeof exception === "string") return true
-    if (exception.active === false) return false
-    if (!exception.expiry) return true
-
-    return new Date(exception.expiry).getTime() > Date.now()
+function isNsprc(value: unknown): value is Nsprc {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function writeNsprc(nsprc) {
-    const sortedNsprc = {}
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+    return error instanceof Error && "code" in error
+}
+
+function isActiveException(exception: unknown): boolean {
+    if (exception === undefined) return false
+    if (typeof exception === "string") return true
+    if (typeof exception !== "object" || exception === null) return true
+
+    const { active, expiry } = exception as { active?: unknown; expiry?: string | number | Date }
+
+    if (active === false) return false
+    if (!expiry) return true
+
+    return new Date(expiry).getTime() > Date.now()
+}
+
+function writeNsprc(nsprc: Nsprc): void {
+    const sortedNsprc: Nsprc = {}
 
     for (const id of Object.keys(nsprc).sort()) {
         sortedNsprc[id] = nsprc[id]
@@ -171,21 +201,21 @@ function writeNsprc(nsprc) {
     writeFileSync(nsprcPath, `${JSON.stringify(sortedNsprc, null, 4)}\n`)
 }
 
-function parseIdList(ids) {
+function parseIdList(ids: string): string[] {
     return ids.split(",").map(normalizeId).filter(Boolean)
 }
 
-function logRemovedExceptions(removed) {
+function logRemovedExceptions(removed: string[]): void {
     if (removed.length) {
         console.log(`Removed vulnerability IDs from .nsprc: ${removed.join(",")}`)
     }
 }
 
-function failUnexpectedAuditResult(audit) {
+function failUnexpectedAuditResult(audit: AuditResult): never {
     console.error("better-npm-audit failed, but no vulnerability IDs could be read from its output.")
     process.exit(audit.status)
 }
 
-function normalizeId(id) {
+function normalizeId(id: unknown): string {
     return String(id ?? "").trim()
 }
