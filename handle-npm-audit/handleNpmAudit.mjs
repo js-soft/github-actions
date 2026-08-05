@@ -11,8 +11,12 @@ handleNpmAudit()
 function handleNpmAudit() {
     const firstAudit = runBetterNpmAudit()
     const newVulnerabilityIds = extractUnhandledVulnerabilityIds(firstAudit.output)
+    const unusedExceptionIds = extractUnusedExceptionIds(firstAudit.output)
 
     if (firstAudit.status === 0) {
+        const { removed } = updateExceptionsInNsprc([], unusedExceptionIds)
+        logRemovedExceptions(removed)
+
         console.log("No new vulnerabilities found.")
         return
     }
@@ -27,8 +31,12 @@ function handleNpmAudit() {
 
     const secondAudit = runBetterNpmAudit()
     const remainingVulnerabilityIds = extractUnhandledVulnerabilityIds(secondAudit.output)
+    const remainingUnusedExceptionIds = extractUnusedExceptionIds(secondAudit.output)
 
     if (secondAudit.status === 0) {
+        const { removed } = updateExceptionsInNsprc([], remainingUnusedExceptionIds)
+        logRemovedExceptions(removed)
+
         console.log("No vulnerabilities remain after npm audit fix.")
         return
     }
@@ -37,10 +45,12 @@ function handleNpmAudit() {
         failUnexpectedAuditResult(secondAudit)
     }
 
-    const addedExceptionIds = addExceptionsToNsprc(remainingVulnerabilityIds)
+    const { added, removed } = updateExceptionsInNsprc(remainingVulnerabilityIds, remainingUnusedExceptionIds)
 
-    if (addedExceptionIds.length) {
-        console.log(`Added vulnerability IDs to .nsprc: ${addedExceptionIds.join(",")}`)
+    logRemovedExceptions(removed)
+
+    if (added.length) {
+        console.log(`Added vulnerability IDs to .nsprc: ${added.join(",")}`)
     } else {
         console.log("Remaining vulnerability IDs were already active in .nsprc.")
     }
@@ -94,9 +104,30 @@ function extractUnhandledVulnerabilityIds(output) {
     return Array.from(new Set(ids)).sort()
 }
 
-function addExceptionsToNsprc(ids) {
+function extractUnusedExceptionIds(output) {
+    const ids = []
+    const unusedExceptionLines = output.matchAll(
+        /excluded vulnerabilities did not match any of the found vulnerabilities:\s*([^\r\n]+)/gi
+    )
+
+    for (const unusedExceptionLine of unusedExceptionLines) {
+        ids.push(...parseIdList(unusedExceptionLine[1].replace(/\.\s+(?:They|It) can be removed.*$/i, "")))
+    }
+
+    return Array.from(new Set(ids)).sort()
+}
+
+function updateExceptionsInNsprc(ids, unusedIds) {
     const nsprc = readNsprc()
     const added = []
+    const removed = []
+
+    for (const id of unusedIds) {
+        if (!Object.hasOwn(nsprc, id)) continue
+
+        delete nsprc[id]
+        removed.push(id)
+    }
 
     for (const id of ids) {
         if (isActiveException(nsprc[id])) continue
@@ -105,9 +136,11 @@ function addExceptionsToNsprc(ids) {
         added.push(id)
     }
 
-    writeNsprc(nsprc)
+    if (added.length || removed.length) {
+        writeNsprc(nsprc)
+    }
 
-    return added
+    return { added, removed }
 }
 
 function readNsprc() {
@@ -140,6 +173,12 @@ function writeNsprc(nsprc) {
 
 function parseIdList(ids) {
     return ids.split(",").map(normalizeId).filter(Boolean)
+}
+
+function logRemovedExceptions(removed) {
+    if (removed.length) {
+        console.log(`Removed vulnerability IDs from .nsprc: ${removed.join(",")}`)
+    }
 }
 
 function failUnexpectedAuditResult(audit) {
