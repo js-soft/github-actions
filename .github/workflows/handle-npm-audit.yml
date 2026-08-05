@@ -1,0 +1,166 @@
+name: Handle npm audit
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version used when node-version-file is empty."
+        required: false
+        type: string
+        default: "lts/*"
+      branch-name:
+        description: "Branch name for the generated pull request."
+        required: false
+        type: string
+        default: "handle-vulnerabilities"
+      commit-message:
+        description: "Commit message for audit changes."
+        required: false
+        type: string
+        default: "Handle vulnerabilities"
+      pull-request-title:
+        description: "Title for the generated pull request."
+        required: false
+        type: string
+        default: "Handle vulnerabilities"
+      pull-request-labels:
+        description: "Comma-separated labels for the generated pull request."
+        required: false
+        type: string
+        default: "dependencies"
+      git-user-name:
+        description: "Git user.name used for the generated commit."
+        required: false
+        type: string
+        default: "js-soft-ops"
+      git-user-email:
+        description: "Git user.email used for the generated commit."
+        required: false
+        type: string
+        default: "ci@js-soft.com"
+    secrets:
+      github-token:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: npm-audit-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: target-repository
+          token: ${{ secrets['github-token'] }}
+
+      - name: Checkout github-actions repository
+        uses: actions/checkout@v6
+        with:
+          repository: js-soft/github-actions
+          ref: main
+          path: github-actions-repo
+
+      - name: Setup Node.js from version file
+        if: inputs['node-version-file'] != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: target-repository/.nvmrc
+
+      - name: Setup Node.js
+        if: inputs['node-version-file'] == ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ inputs['node-version'] }}
+
+      - name: Handle npm audit
+        working-directory: target-repository
+        run: node ../github-actions-repo/handle-npm-audit/handleNpmAudit.mjs
+
+      - name: Check for changes
+        id: changes
+        working-directory: target-repository
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create branch
+        id: branch
+        if: steps.changes.outputs.has_changes == 'true'
+        working-directory: target-repository
+        env:
+          BRANCH_NAME: ${{ inputs['branch-name'] }}
+          GIT_USER_NAME: ${{ inputs['git-user-name'] }}
+          GIT_USER_EMAIL: ${{ inputs['git-user-email'] }}
+        run: |
+          git config user.name "$GIT_USER_NAME"
+          git config user.email "$GIT_USER_EMAIL"
+          git fetch origin "$BRANCH_NAME" || true
+          git switch -c "$BRANCH_NAME"
+
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Commit changes
+        id: commit
+        if: steps.changes.outputs.has_changes == 'true'
+        working-directory: target-repository
+        env:
+          COMMIT_MESSAGE: ${{ inputs['commit-message'] }}
+        run: |
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "$COMMIT_MESSAGE"
+          git push --force-with-lease --set-upstream origin "${{ steps.branch.outputs.branch_name }}"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.commit.outputs.has_changes == 'true'
+        working-directory: target-repository
+        env:
+          GH_TOKEN: ${{ secrets['github-token'] }}
+          BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+          PR_TITLE: ${{ inputs['pull-request-title'] }}
+          PR_LABELS: ${{ inputs['pull-request-labels'] }}
+        run: |
+          existing_pr_url=$(gh pr list --head "$BRANCH_NAME" --state open --json url --jq '.[0].url')
+
+          if [ -n "$existing_pr_url" ]; then
+            echo "Pull request already exists: $existing_pr_url"
+            exit 0
+          fi
+
+          cat > audit-pr-body.md <<EOF
+          This PR was created automatically because npm audit found vulnerabilities.
+
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+
+          label_args=()
+          IFS=',' read -ra labels <<< "$PR_LABELS"
+          for label in "${labels[@]}"; do
+            trimmed_label="$(echo "$label" | xargs)"
+            if [ -n "$trimmed_label" ]; then
+              label_args+=(--label "$trimmed_label")
+            fi
+          done
+
+          gh pr create \
+            --head "$BRANCH_NAME" \
+            --base "${{ github.event.repository.default_branch }}" \
+            --title "$PR_TITLE" \
+            --body-file audit-pr-body.md \
+            "${label_args[@]}"
