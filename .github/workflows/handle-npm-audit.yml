@@ -128,6 +128,7 @@ jobs:
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
 
       - name: Create pull request
+        id: pull-request
         if: steps.commit.outputs.has_changes == 'true'
         working-directory: target-repository
         env:
@@ -140,27 +141,46 @@ jobs:
 
           if [ -n "$existing_pr_url" ]; then
             echo "Pull request already exists: $existing_pr_url"
-            exit 0
-          fi
-
-          cat > audit-pr-body.md <<EOF
+            pr_url="$existing_pr_url"
+          else
+            cat > audit-pr-body.md <<EOF
           This PR was created automatically because npm audit found vulnerabilities.
 
           Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           EOF
 
-          label_args=()
-          IFS=',' read -ra labels <<< "$PR_LABELS"
-          for label in "${labels[@]}"; do
-            trimmed_label="$(echo "$label" | xargs)"
-            if [ -n "$trimmed_label" ]; then
-              label_args+=(--label "$trimmed_label")
-            fi
-          done
+            label_args=()
+            IFS=',' read -ra labels <<< "$PR_LABELS"
+            for label in "${labels[@]}"; do
+              trimmed_label="$(echo "$label" | xargs)"
+              if [ -n "$trimmed_label" ]; then
+                label_args+=(--label "$trimmed_label")
+              fi
+            done
 
-          gh pr create \
-            --head "$BRANCH_NAME" \
-            --base "${{ github.event.repository.default_branch }}" \
-            --title "$PR_TITLE" \
-            --body-file audit-pr-body.md \
-            "${label_args[@]}"
+            pr_url=$(gh pr create \
+              --head "$BRANCH_NAME" \
+              --base "${{ github.event.repository.default_branch }}" \
+              --title "$PR_TITLE" \
+              --body-file audit-pr-body.md \
+              "${label_args[@]}")
+          fi
+
+          pr_number=$(gh pr view "$pr_url" --json number --jq '.number')
+          pr_title=$(gh pr view "$pr_url" --json title --jq '.title')
+
+          {
+            echo "number=$pr_number"
+            echo "title<<EOF"
+            echo "$pr_title"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge
+        if: steps.commit.outputs.has_changes == 'true'
+        working-directory: target-repository
+        env:
+          GH_TOKEN: ${{ secrets['github-token'] }}
+          PR_NUMBER: ${{ steps.pull-request.outputs.number }}
+          PR_TITLE: ${{ steps.pull-request.outputs.title }}
+        run: gh pr merge "$PR_NUMBER" --auto --squash --subject "$PR_TITLE ($PR_NUMBER)" --body ""
