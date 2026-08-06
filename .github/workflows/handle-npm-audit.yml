@@ -8,7 +8,7 @@ on:
         required: false
         type: string
         default: "lts/*"
-node-version-file:
+      node-version-file:
         description: "Path to a Node.js version file. Set to an empty string to use node-version instead."
         required: false
         type: string
@@ -43,6 +43,11 @@ node-version-file:
         required: false
         type: string
         default: "ci@js-soft.com"
+      auto-merge-method:
+        description: "Controls pull request auto-merge: off, on, or ignore-branch-protection."
+        required: false
+        type: string
+        default: "ignore-branch-protection"
     secrets:
       github-token:
         required: true
@@ -87,6 +92,21 @@ jobs:
       - name: Install github-actions dependencies
         working-directory: github-actions-repo
         run: npm ci
+
+      - name: Validate auto-merge method
+        env:
+          AUTO_MERGE_METHOD: ${{ inputs['auto-merge-method'] }}
+        run: |
+          set -euo pipefail
+
+          case "$AUTO_MERGE_METHOD" in
+            off|on|ignore-branch-protection)
+              ;;
+            *)
+              echo "::error::Invalid auto-merge-method '$AUTO_MERGE_METHOD'. Expected one of: off, on, ignore-branch-protection."
+              exit 1
+              ;;
+          esac
 
       - name: Handle npm audit
         working-directory: target-repository
@@ -185,11 +205,45 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Enable auto-merge
-        if: steps.commit.outputs.has_changes == 'true'
+      - name: Merge pull request
+        if: steps.commit.outputs.has_changes == 'true' && inputs['auto-merge-method'] != 'off'
         working-directory: target-repository
         env:
           GH_TOKEN: ${{ secrets['github-token'] }}
+          AUTO_MERGE_METHOD: ${{ inputs['auto-merge-method'] }}
           PR_NUMBER: ${{ steps.pull-request.outputs.number }}
           PR_TITLE: ${{ steps.pull-request.outputs.title }}
-        run: gh pr merge "$PR_NUMBER" --auto --squash --subject "$PR_TITLE ($PR_NUMBER)" --body ""
+        run: |
+          set -euo pipefail
+
+          merge_args=("$PR_NUMBER" --squash --subject "$PR_TITLE ($PR_NUMBER)" --body "")
+
+          enable_auto_merge() {
+            gh pr merge "${merge_args[@]}" --auto
+          }
+
+          case "$AUTO_MERGE_METHOD" in
+            on)
+              enable_auto_merge
+              ;;
+            ignore-branch-protection)
+              force_merge_output="$(mktemp)"
+
+              if gh pr merge "${merge_args[@]}" --admin >"$force_merge_output" 2>&1; then
+                cat "$force_merge_output"
+              else
+                cat "$force_merge_output"
+
+                cat > force-merge-fallback-comment.md <<EOF
+          The attempt to merge this pull request while bypassing branch protection rules failed.
+
+          The most likely cause is that the user behind the workflow token is not allowed to bypass branch protection rules. To fix this, grant the js-soft-ops user permission to bypass the repository's branch protection rules, then rerun the workflow.
+
+          Fallback: normal auto-merge has been enabled for this pull request.
+          EOF
+
+                gh pr comment "$PR_NUMBER" --body-file force-merge-fallback-comment.md
+                enable_auto_merge
+              fi
+              ;;
+          esac
