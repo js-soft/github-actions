@@ -47,10 +47,6 @@ on:
       github-token:
         required: true
 
-permissions:
-  contents: write
-  pull-requests: write
-
 concurrency:
   group: npm-audit-${{ github.repository }}
   cancel-in-progress: false
