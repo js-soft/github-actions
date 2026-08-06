@@ -28,11 +28,6 @@ on:
         required: false
         type: string
         default: "Handle vulnerabilities"
-      pull-request-labels:
-        description: "Comma-separated labels for the generated pull request."
-        required: false
-        type: string
-        default: "dependencies"
       git-user-name:
         description: "Git user.name used for the generated commit."
         required: false
@@ -118,10 +113,18 @@ jobs:
         id: changes
         working-directory: target-repository
         run: |
-          if [ -z "$(git status --porcelain)" ]; then
+          changes="$(git status --porcelain=v1 --untracked-files=all)"
+
+          if [ -z "$changes" ]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$(printf "%s\n" "$changes" | wc -l | xargs)" = "1" ] && [[ "$changes" == ??" .nsprc" ]]; then
+            echo "only_nsprc_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "only_nsprc_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create branch
@@ -166,8 +169,16 @@ jobs:
           GH_TOKEN: ${{ secrets['github-token'] }}
           BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
           PR_TITLE: ${{ inputs['pull-request-title'] }}
-          PR_LABELS: ${{ inputs['pull-request-labels'] }}
+          ONLY_NSPRC_CHANGED: ${{ steps.changes.outputs.only_nsprc_changed }}
         run: |
+          if [ "$ONLY_NSPRC_CHANGED" = "true" ]; then
+            PR_LABEL="chore"
+            REPLACED_PR_LABEL="dependencies"
+          else
+            PR_LABEL="dependencies"
+            REPLACED_PR_LABEL="chore"
+          fi
+
           cat > audit-pr-body.md <<EOF
           This PR was created automatically because npm audit found vulnerabilities.
 
@@ -188,22 +199,23 @@ jobs:
             echo "Pull request already exists: $existing_pr_url"
             pr_url="$existing_pr_url"
             gh pr edit "$pr_url" --body-file audit-pr-body.md
-          else
-            label_args=()
-            IFS=',' read -ra labels <<< "$PR_LABELS"
-            for label in "${labels[@]}"; do
-              trimmed_label="$(echo "$label" | xargs)"
-              if [ -n "$trimmed_label" ]; then
-                label_args+=(--label "$trimmed_label")
-              fi
-            done
 
+            existing_labels="$(gh pr view "$pr_url" --json labels --jq '.labels[].name')"
+
+            if printf "%s\n" "$existing_labels" | grep -Fxq "$REPLACED_PR_LABEL"; then
+              gh pr edit "$pr_url" --remove-label "$REPLACED_PR_LABEL"
+            fi
+
+            if ! printf "%s\n" "$existing_labels" | grep -Fxq "$PR_LABEL"; then
+              gh pr edit "$pr_url" --add-label "$PR_LABEL"
+            fi
+          else
             pr_url=$(gh pr create \
               --head "$BRANCH_NAME" \
               --base "${{ github.event.repository.default_branch }}" \
               --title "$PR_TITLE" \
               --body-file audit-pr-body.md \
-              "${label_args[@]}")
+              --label "$PR_LABEL")
           fi
 
           pr_number=$(gh pr view "$pr_url" --json number --jq '.number')
