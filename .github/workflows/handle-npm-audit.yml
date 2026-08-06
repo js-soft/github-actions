@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: "lts/*"
+node-version-file:
+        description: "Path to a Node.js version file. Set to an empty string to use node-version instead."
+        required: false
+        type: string
+        default: ".nvmrc"
       branch-name:
         description: "Branch name for the generated pull request."
         required: false
