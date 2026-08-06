@@ -29,9 +29,9 @@ type AuditPrTableRow = {
     action: AuditAction
 }
 
-handleNpmAudit()
+dealWithVulnerabilities()
 
-function handleNpmAudit(): void {
+function dealWithVulnerabilities(): void {
     const firstAudit = runBetterNpmAudit()
     const firstAuditSeverities = readNpmAuditSeveritiesById()
     const newVulnerabilityIds = extractUnhandledVulnerabilityIds(firstAudit.output)

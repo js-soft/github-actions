@@ -107,7 +107,7 @@ jobs:
         working-directory: target-repository
         env:
           NPM_AUDIT_PR_TABLE_PATH: ${{ runner.temp }}/npm-audit-pr-table.md
-        run: ../github-actions-repo/node_modules/.bin/tsx ../github-actions-repo/handle-npm-audit/handleNpmAudit.ts
+        run: ../github-actions-repo/node_modules/.bin/tsx ../github-actions-repo/dependency-security-maintenance/dealWithVulnerabilities.ts
 
       - name: Check for changes
         id: changes

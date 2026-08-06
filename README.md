@@ -39,7 +39,7 @@ Inputs:
 
 - `branch`: branch to inspect and release from. Defaults to `main`.
 
-## handle-npm-audit
+## dependency-security-maintenance
 
 Runs `better-npm-audit`, applies `npm audit fix`, updates `.nsprc` with remaining vulnerability exceptions, and creates or updates a pull request with the current audit result when files changed. If no changes are needed, any open audit pull request is commented on and closed.
 
@@ -49,7 +49,7 @@ jobs:
         permissions:
             contents: write
             pull-requests: write
-        uses: js-soft/github-actions/.github/workflows/handle-npm-audit.yml@main
+        uses: js-soft/github-actions/.github/workflows/dependency-security-maintenance.yml@main
         with:
             auto-merge-method: ignore-branch-protection
         secrets:
