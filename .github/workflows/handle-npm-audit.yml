@@ -127,6 +127,31 @@ jobs:
             echo "only_nsprc_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Close stale pull request
+        if: steps.changes.outputs.has_changes == 'false'
+        working-directory: target-repository
+        env:
+          GH_TOKEN: ${{ secrets['github-token'] }}
+          BRANCH_NAME: ${{ inputs['branch-name'] }}
+        run: |
+          existing_pr_url=$(gh pr list --head "$BRANCH_NAME" --state open --json url --jq '.[0].url')
+
+          if [ -z "$existing_pr_url" ]; then
+            echo "No open pull request found for branch '$BRANCH_NAME'."
+            exit 0
+          fi
+
+          cat > close-pr-comment.md <<EOF
+          Closing this pull request automatically because the latest npm audit run did not produce any repository changes.
+
+          This can happen when no vulnerabilities remain or when all necessary npm audit changes are already up to date.
+
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+
+          gh pr comment "$existing_pr_url" --body-file close-pr-comment.md
+          gh pr close "$existing_pr_url"
+
       - name: Create branch
         id: branch
         if: steps.changes.outputs.has_changes == 'true'

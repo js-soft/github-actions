@@ -41,7 +41,7 @@ Inputs:
 
 ## handle-npm-audit
 
-Runs `better-npm-audit`, applies `npm audit fix`, updates `.nsprc` with remaining vulnerability exceptions, and creates or updates a pull request when files changed.
+Runs `better-npm-audit`, applies `npm audit fix`, updates `.nsprc` with remaining vulnerability exceptions, and creates or updates a pull request with the current audit result when files changed. If no changes are needed, any open audit pull request is commented on and closed.
 
 ```yaml
 jobs:
