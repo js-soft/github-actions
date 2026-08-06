@@ -110,6 +110,8 @@ jobs:
 
       - name: Handle npm audit
         working-directory: target-repository
+        env:
+          NPM_AUDIT_PR_TABLE_PATH: ${{ runner.temp }}/npm-audit-pr-table.md
         run: ../github-actions-repo/node_modules/.bin/tsx ../github-actions-repo/handle-npm-audit/handleNpmAudit.ts
 
       - name: Check for changes
@@ -166,18 +168,27 @@ jobs:
           PR_TITLE: ${{ inputs['pull-request-title'] }}
           PR_LABELS: ${{ inputs['pull-request-labels'] }}
         run: |
+          cat > audit-pr-body.md <<EOF
+          This PR was created automatically because npm audit found vulnerabilities.
+
+          EOF
+
+          if [ -s "${RUNNER_TEMP}/npm-audit-pr-table.md" ]; then
+            cat "${RUNNER_TEMP}/npm-audit-pr-table.md" >> audit-pr-body.md
+            echo "" >> audit-pr-body.md
+          fi
+
+          cat >> audit-pr-body.md <<EOF
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+
           existing_pr_url=$(gh pr list --head "$BRANCH_NAME" --state open --json url --jq '.[0].url')
 
           if [ -n "$existing_pr_url" ]; then
             echo "Pull request already exists: $existing_pr_url"
             pr_url="$existing_pr_url"
+            gh pr edit "$pr_url" --body-file audit-pr-body.md
           else
-            cat > audit-pr-body.md <<EOF
-          This PR was created automatically because npm audit found vulnerabilities.
-
-          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-          EOF
-
             label_args=()
             IFS=',' read -ra labels <<< "$PR_LABELS"
             for label in "${labels[@]}"; do

@@ -5,6 +5,9 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 const nsprcPath = resolve(process.cwd(), ".nsprc")
+const auditPrTablePath = process.env["NPM_AUDIT_PR_TABLE_PATH"]
+
+const severityOrder = ["unknown", "low", "moderate", "medium", "high", "critical"] as const
 
 type AuditResult = {
     output: string
@@ -18,16 +21,26 @@ type ExceptionUpdateResult = {
 
 type Nsprc = Record<string, unknown>
 
+type AuditAction = "Fixed" | "Added Exception" | "Removed Exception"
+
+type AuditPrTableRow = {
+    advisoryId: string
+    severity: string
+    action: AuditAction
+}
+
 handleNpmAudit()
 
 function handleNpmAudit(): void {
     const firstAudit = runBetterNpmAudit()
+    const firstAuditSeverities = readNpmAuditSeveritiesById()
     const newVulnerabilityIds = extractUnhandledVulnerabilityIds(firstAudit.output)
     const unusedExceptionIds = extractUnusedExceptionIds(firstAudit.output)
 
     if (firstAudit.status === 0) {
         const { removed } = updateExceptionsInNsprc([], unusedExceptionIds)
         logRemovedExceptions(removed)
+        writeAuditPrTable(removed.map((id) => createAuditPrTableRow(id, "Removed Exception", firstAuditSeverities)))
 
         console.log("No new vulnerabilities found.")
         return
@@ -42,12 +55,19 @@ function handleNpmAudit(): void {
     runNpmAuditFix()
 
     const secondAudit = runBetterNpmAudit()
+    const secondAuditSeverities = readNpmAuditSeveritiesById()
     const remainingVulnerabilityIds = extractUnhandledVulnerabilityIds(secondAudit.output)
     const remainingUnusedExceptionIds = extractUnusedExceptionIds(secondAudit.output)
 
     if (secondAudit.status === 0) {
         const { removed } = updateExceptionsInNsprc([], remainingUnusedExceptionIds)
         logRemovedExceptions(removed)
+        writeAuditPrTable([
+            ...newVulnerabilityIds.map((id) => createAuditPrTableRow(id, "Fixed", firstAuditSeverities)),
+            ...removed.map((id) =>
+                createAuditPrTableRow(id, "Removed Exception", firstAuditSeverities, secondAuditSeverities)
+            )
+        ])
 
         console.log("No vulnerabilities remain after npm audit fix.")
         return
@@ -58,6 +78,15 @@ function handleNpmAudit(): void {
     }
 
     const { added, removed } = updateExceptionsInNsprc(remainingVulnerabilityIds, remainingUnusedExceptionIds)
+    const fixedVulnerabilityIds = newVulnerabilityIds.filter((id) => !remainingVulnerabilityIds.includes(id))
+
+    writeAuditPrTable([
+        ...fixedVulnerabilityIds.map((id) => createAuditPrTableRow(id, "Fixed", firstAuditSeverities)),
+        ...added.map((id) => createAuditPrTableRow(id, "Added Exception", secondAuditSeverities, firstAuditSeverities)),
+        ...removed.map((id) =>
+            createAuditPrTableRow(id, "Removed Exception", firstAuditSeverities, secondAuditSeverities)
+        )
+    ])
 
     logRemovedExceptions(removed)
 
@@ -66,6 +95,100 @@ function handleNpmAudit(): void {
     } else {
         console.log("Remaining vulnerability IDs were already active in .nsprc.")
     }
+}
+
+function readNpmAuditSeveritiesById(): Map<string, string> {
+    if (!auditPrTablePath) return new Map()
+
+    const result = spawnSync("npm", ["audit", "--json"], {
+        encoding: "utf8",
+        shell: false
+    })
+
+    if (result.error) {
+        console.warn(`Unable to read npm audit severities: ${result.error.message}`)
+        return new Map()
+    }
+
+    if (!result.stdout) {
+        if (result.status && result.status > 1) {
+            console.warn("Unable to read npm audit severities: npm audit did not return JSON output.")
+        }
+
+        return new Map()
+    }
+
+    try {
+        return extractNpmAuditSeverities(JSON.parse(result.stdout))
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`Unable to parse npm audit severities: ${message}`)
+        return new Map()
+    }
+}
+
+function extractNpmAuditSeverities(auditReport: unknown): Map<string, string> {
+    const severitiesById = new Map<string, string>()
+
+    if (!isRecord(auditReport) || !isRecord(auditReport.vulnerabilities)) return severitiesById
+
+    for (const vulnerability of Object.values(auditReport.vulnerabilities)) {
+        if (!isRecord(vulnerability)) continue
+
+        const fallbackSeverity = normalizeSeverity(vulnerability.severity)
+        const via = Array.isArray(vulnerability.via) ? vulnerability.via : []
+
+        for (const advisory of via) {
+            if (!isRecord(advisory)) continue
+
+            const severity = normalizeSeverity(advisory.severity) ?? fallbackSeverity
+            if (!severity) continue
+
+            for (const id of extractAdvisoryIds(advisory)) {
+                setHighestSeverity(severitiesById, id, severity)
+            }
+        }
+    }
+
+    return severitiesById
+}
+
+function extractAdvisoryIds(advisory: Record<string, unknown>): string[] {
+    const ids = [advisory.source, advisory.id].map(normalizeId).filter(Boolean)
+    const url = normalizeId(advisory.url)
+    const githubAdvisoryId = url.match(/\/(GHSA-[a-z0-9-]+)/i)?.[1]
+    const npmAdvisoryId = url.match(/\/advisories\/(\d+)/i)?.[1]
+
+    if (githubAdvisoryId) ids.push(githubAdvisoryId)
+    if (npmAdvisoryId) ids.push(npmAdvisoryId)
+
+    return Array.from(new Set(ids))
+}
+
+function setHighestSeverity(severitiesById: Map<string, string>, id: string, severity: string): void {
+    const existingSeverity = severitiesById.get(id)
+
+    if (!existingSeverity || getSeverityRank(severity) > getSeverityRank(existingSeverity)) {
+        severitiesById.set(id, severity)
+    }
+}
+
+function getSeverityRank(severity: string): number {
+    const normalizedSeverity = severity.toLowerCase()
+    const index = severityOrder.indexOf(normalizedSeverity as (typeof severityOrder)[number])
+
+    return index === -1 ? 0 : index
+}
+
+function normalizeSeverity(severity: unknown): string | undefined {
+    if (typeof severity !== "string") return undefined
+
+    const normalizedSeverity = severity.trim().toLowerCase()
+    if (!normalizedSeverity) return undefined
+
+    return normalizedSeverity === "moderate"
+        ? "Medium"
+        : `${normalizedSeverity[0].toUpperCase()}${normalizedSeverity.slice(1)}`
 }
 
 function runBetterNpmAudit(): AuditResult {
@@ -174,6 +297,10 @@ function isNsprc(value: unknown): value is Nsprc {
     return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
     return error instanceof Error && "code" in error
 }
@@ -209,6 +336,62 @@ function logRemovedExceptions(removed: string[]): void {
     if (removed.length) {
         console.log(`Removed vulnerability IDs from .nsprc: ${removed.join(",")}`)
     }
+}
+
+function writeAuditPrTable(rows: AuditPrTableRow[]): void {
+    if (!auditPrTablePath) return
+
+    const sortedRows = [...rows].sort(compareAuditPrTableRows)
+    const lines = [
+        "| Advisory ID | Severity | Action |",
+        "| --- | --- | --- |",
+        ...sortedRows.map((row) => `| ${escapeMarkdownTableCell(row.advisoryId)} | ${row.severity} | ${row.action} |`)
+    ]
+
+    writeFileSync(auditPrTablePath, `${lines.join("\n")}\n`)
+}
+
+function createAuditPrTableRow(
+    advisoryId: string,
+    action: AuditAction,
+    ...severityMaps: Map<string, string>[]
+): AuditPrTableRow {
+    return {
+        advisoryId,
+        severity: getAdvisorySeverity(advisoryId, severityMaps),
+        action
+    }
+}
+
+function getAdvisorySeverity(advisoryId: string, severityMaps: Map<string, string>[]): string {
+    for (const severityMap of severityMaps) {
+        const severity = severityMap.get(advisoryId)
+        if (severity) return severity
+    }
+
+    return "Unknown"
+}
+
+function compareAuditPrTableRows(left: AuditPrTableRow, right: AuditPrTableRow): number {
+    const actionComparison = getActionRank(left.action) - getActionRank(right.action)
+    if (actionComparison !== 0) return actionComparison
+
+    return left.advisoryId.localeCompare(right.advisoryId)
+}
+
+function getActionRank(action: AuditAction): number {
+    switch (action) {
+        case "Fixed":
+            return 0
+        case "Added Exception":
+            return 1
+        case "Removed Exception":
+            return 2
+    }
+}
+
+function escapeMarkdownTableCell(value: string): string {
+    return value.replaceAll("|", "\\|")
 }
 
 function failUnexpectedAuditResult(audit: AuditResult): never {
