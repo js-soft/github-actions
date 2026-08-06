@@ -39,6 +39,37 @@ Inputs:
 
 - `branch`: branch to inspect and release from. Defaults to `main`.
 
+## handle-npm-audit
+
+Runs `better-npm-audit`, applies `npm audit fix`, updates `.nsprc` with remaining vulnerability exceptions, and creates or updates a pull request when files changed.
+
+```yaml
+jobs:
+    npm-audit:
+        permissions:
+            contents: write
+            pull-requests: write
+        uses: js-soft/github-actions/.github/workflows/handle-npm-audit.yml@main
+        with:
+            auto-merge-method: ignore-branch-protection
+        secrets:
+            github-token: ${{ secrets.JS_SOFT_OPS_TOKEN }}
+```
+
+Inputs:
+
+- `auto-merge-method`: controls pull request auto-merge. Allowed values are `off`, `on`, and `ignore-branch-protection`. Defaults to `ignore-branch-protection`.
+- `branch-name`: branch name for the generated pull request. Defaults to `handle-vulnerabilities`.
+- `commit-message`: commit message for audit changes. Defaults to `Handle vulnerabilities`.
+- `git-user-email`: Git `user.email` used for the generated commit. Defaults to `ci@js-soft.com`.
+- `git-user-name`: Git `user.name` used for the generated commit. Defaults to `js-soft-ops`.
+- `node-version`: Node.js version used when `node-version-file` is empty. Defaults to `lts/*`.
+- `node-version-file`: path to a Node.js version file. Set to an empty string to use `node-version` instead. Defaults to `.nvmrc`.
+- `pull-request-labels`: comma-separated labels for the generated pull request. Defaults to `dependencies`.
+- `pull-request-title`: title for the generated pull request. Defaults to `Handle vulnerabilities`.
+
+When `auto-merge-method` is `ignore-branch-protection`, the workflow first tries to merge the pull request with administrator privileges. The token user, normally `js-soft-ops`, must be allowed to bypass branch protection rules for this to work. If that merge attempt fails, the workflow comments on the pull request with the required fix and enables normal auto-merge as a fallback.
+
 ## validate-pr-label
 
 Validates that a pull request has at least one accepted label. By default, the
