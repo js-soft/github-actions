@@ -1,14 +1,293 @@
-name: Dependency Security Maintenance
+name: Handle npm audit
 
 on:
-  schedule:
-    - cron: "0 2 * * 2" # every Tuesday at 02:00 UTC
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version used when node-version-file is empty."
+        required: false
+        type: string
+        default: "lts/*"
+      node-version-file:
+        description: "Path to a Node.js version file. Set to an empty string to use node-version instead."
+        required: false
+        type: string
+        default: ".nvmrc"
+      branch-name:
+        description: "Branch name for the generated pull request."
+        required: false
+        type: string
+        default: "handle-vulnerabilities"
+      commit-message:
+        description: "Commit message for audit changes."
+        required: false
+        type: string
+        default: "Handle vulnerabilities"
+      pull-request-title:
+        description: "Title for the generated pull request."
+        required: false
+        type: string
+        default: "Handle vulnerabilities"
+      git-user-name:
+        description: "Git user.name used for the generated commit."
+        required: false
+        type: string
+        default: "js-soft-ops"
+      git-user-email:
+        description: "Git user.email used for the generated commit."
+        required: false
+        type: string
+        default: "ci@js-soft.com"
+      auto-merge-method:
+        description: "Controls pull request auto-merge: off, on, or ignore-branch-protection."
+        required: false
+        type: string
+        default: "ignore-branch-protection"
+    secrets:
+      github-token:
+        required: true
 
-permissions: {}
+concurrency:
+  group: npm-audit-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   npm-audit:
-    uses: js-soft/github-actions/.github/workflows/dependency-security-maintenance.yml@main
-    secrets:
-      github-token: ${{ secrets.GH_PAT }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: target-repository
+          token: ${{ secrets['github-token'] }}
+
+      - name: Checkout github-actions repository
+        uses: actions/checkout@v6
+        with:
+          repository: js-soft/github-actions
+          ref: main
+          path: github-actions-repo
+
+      - name: Setup Node.js from version file
+        if: inputs['node-version-file'] != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: target-repository/.nvmrc
+
+      - name: Setup Node.js
+        if: inputs['node-version-file'] == ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ inputs['node-version'] }}
+
+      - name: Install github-actions dependencies
+        working-directory: github-actions-repo
+        run: npm ci
+
+      - name: Validate auto-merge method
+        env:
+          AUTO_MERGE_METHOD: ${{ inputs['auto-merge-method'] }}
+        run: |
+          set -euo pipefail
+
+          case "$AUTO_MERGE_METHOD" in
+            off|on|ignore-branch-protection)
+              ;;
+            *)
+              echo "::error::Invalid auto-merge-method '$AUTO_MERGE_METHOD'. Expected one of: off, on, ignore-branch-protection."
+              exit 1
+              ;;
+          esac
+
+      - name: Handle npm audit
+        working-directory: target-repository
+        env:
+          NPM_AUDIT_PR_TABLE_PATH: ${{ runner.temp }}/npm-audit-pr-table.md
+        run: ../github-actions-repo/node_modules/.bin/tsx ../github-actions-repo/dependency-security-maintenance/dealWithVulnerabilities.ts
+
+      - name: Check for changes
+        id: changes
+        working-directory: target-repository
+        run: |
+          changes="$(git status --porcelain=v1 --untracked-files=all)"
+
+          if [ -z "$changes" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$(printf "%s\n" "$changes" | wc -l | xargs)" = "1" ] && [[ "$changes" == ??" .nsprc" ]]; then
+            echo "only_nsprc_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "only_nsprc_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Close stale pull request
+        if: steps.changes.outputs.has_changes == 'false'
+        working-directory: target-repository
+        env:
+          GH_TOKEN: ${{ secrets['github-token'] }}
+          BRANCH_NAME: ${{ inputs['branch-name'] }}
+        run: |
+          existing_pr_url=$(gh pr list --head "$BRANCH_NAME" --state open --json url --jq '.[0].url')
+
+          if [ -z "$existing_pr_url" ]; then
+            echo "No open pull request found for branch '$BRANCH_NAME'."
+            exit 0
+          fi
+
+          cat > close-pr-comment.md <<EOF
+          Closing this pull request automatically because the latest npm audit run did not produce any repository changes.
+
+          This can happen when no vulnerabilities remain or when all necessary npm audit changes are already up to date.
+
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+
+          gh pr comment "$existing_pr_url" --body-file close-pr-comment.md
+          gh pr close "$existing_pr_url"
+
+      - name: Create branch
+        id: branch
+        if: steps.changes.outputs.has_changes == 'true'
+        working-directory: target-repository
+        env:
+          BRANCH_NAME: ${{ inputs['branch-name'] }}
+          GIT_USER_NAME: ${{ inputs['git-user-name'] }}
+          GIT_USER_EMAIL: ${{ inputs['git-user-email'] }}
+        run: |
+          git config user.name "$GIT_USER_NAME"
+          git config user.email "$GIT_USER_EMAIL"
+          git fetch origin "$BRANCH_NAME" || true
+          git switch -c "$BRANCH_NAME"
+
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Commit changes
+        id: commit
+        if: steps.changes.outputs.has_changes == 'true'
+        working-directory: target-repository
+        env:
+          COMMIT_MESSAGE: ${{ inputs['commit-message'] }}
+        run: |
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "$COMMIT_MESSAGE"
+          git push --force-with-lease --set-upstream origin "${{ steps.branch.outputs.branch_name }}"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        id: pull-request
+        if: steps.commit.outputs.has_changes == 'true'
+        working-directory: target-repository
+        env:
+          GH_TOKEN: ${{ secrets['github-token'] }}
+          BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+          PR_TITLE: ${{ inputs['pull-request-title'] }}
+          ONLY_NSPRC_CHANGED: ${{ steps.changes.outputs.only_nsprc_changed }}
+        run: |
+          if [ "$ONLY_NSPRC_CHANGED" = "true" ]; then
+            PR_LABEL="chore"
+            REPLACED_PR_LABEL="dependencies"
+          else
+            PR_LABEL="dependencies"
+            REPLACED_PR_LABEL="chore"
+          fi
+
+          cat > audit-pr-body.md <<EOF
+          This PR was created automatically because npm audit found vulnerabilities.
+
+          EOF
+
+          if [ -s "${RUNNER_TEMP}/npm-audit-pr-table.md" ]; then
+            cat "${RUNNER_TEMP}/npm-audit-pr-table.md" >> audit-pr-body.md
+            echo "" >> audit-pr-body.md
+          fi
+
+          cat >> audit-pr-body.md <<EOF
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+
+          existing_pr_url=$(gh pr list --head "$BRANCH_NAME" --state open --json url --jq '.[0].url')
+
+          if [ -n "$existing_pr_url" ]; then
+            echo "Pull request already exists: $existing_pr_url"
+            pr_url="$existing_pr_url"
+            gh pr edit "$pr_url" --body-file audit-pr-body.md
+
+            existing_labels="$(gh pr view "$pr_url" --json labels --jq '.labels[].name')"
+
+            if printf "%s\n" "$existing_labels" | grep -Fxq "$REPLACED_PR_LABEL"; then
+              gh pr edit "$pr_url" --remove-label "$REPLACED_PR_LABEL"
+            fi
+
+            if ! printf "%s\n" "$existing_labels" | grep -Fxq "$PR_LABEL"; then
+              gh pr edit "$pr_url" --add-label "$PR_LABEL"
+            fi
+          else
+            pr_url=$(gh pr create \
+              --head "$BRANCH_NAME" \
+              --base "${{ github.event.repository.default_branch }}" \
+              --title "$PR_TITLE" \
+              --body-file audit-pr-body.md \
+              --label "$PR_LABEL")
+          fi
+
+          pr_number=$(gh pr view "$pr_url" --json number --jq '.number')
+          pr_title=$(gh pr view "$pr_url" --json title --jq '.title')
+
+          {
+            echo "number=$pr_number"
+            echo "title<<EOF"
+            echo "$pr_title"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Merge pull request
+        if: steps.commit.outputs.has_changes == 'true' && inputs['auto-merge-method'] != 'off'
+        working-directory: target-repository
+        env:
+          GH_TOKEN: ${{ secrets['github-token'] }}
+          AUTO_MERGE_METHOD: ${{ inputs['auto-merge-method'] }}
+          PR_NUMBER: ${{ steps.pull-request.outputs.number }}
+          PR_TITLE: ${{ steps.pull-request.outputs.title }}
+        run: |
+          set -euo pipefail
+
+          merge_args=("$PR_NUMBER" --squash --subject "$PR_TITLE ($PR_NUMBER)" --body "")
+
+          enable_auto_merge() {
+            gh pr merge "${merge_args[@]}" --auto
+          }
+
+          case "$AUTO_MERGE_METHOD" in
+            on)
+              enable_auto_merge
+              ;;
+            ignore-branch-protection)
+              force_merge_output="$(mktemp)"
+
+              if gh pr merge "${merge_args[@]}" --admin >"$force_merge_output" 2>&1; then
+                cat "$force_merge_output"
+              else
+                cat "$force_merge_output"
+
+                cat > force-merge-fallback-comment.md <<EOF
+          The attempt to merge this pull request while bypassing branch protection rules failed.
+
+          The most likely cause is that the user behind the workflow token is not allowed to bypass branch protection rules. To fix this, grant the js-soft-ops user permission to bypass the repository's branch protection rules, then rerun the workflow.
+
+          Fallback: normal auto-merge has been enabled for this pull request.
+          EOF
+
+                gh pr comment "$PR_NUMBER" --body-file force-merge-fallback-comment.md
+                enable_auto_merge
+              fi
+              ;;
+          esac
