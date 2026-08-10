@@ -63,8 +63,8 @@ Inputs:
 - `commit-message`: commit message for audit changes. Defaults to `Handle vulnerabilities`.
 - `git-user-email`: Git `user.email` used for the generated commit. Defaults to `ci@js-soft.com`.
 - `git-user-name`: Git `user.name` used for the generated commit. Defaults to `js-soft-ops`.
-- `node-version`: Node.js version used when `node-version-file` is empty. Defaults to `lts/*`.
-- `node-version-file`: path to a Node.js version file. Set to an empty string to use `node-version` instead. Defaults to `.nvmrc`.
+- `node-version`: Node.js version used when `node-version-file` is empty or missing. Defaults to `lts/*`.
+- `node-version-file`: path to a Node.js version file. Falls back to `node-version` when empty or missing. Defaults to `.nvmrc`.
 - `pull-request-title`: title for the generated pull request. Defaults to `Handle vulnerabilities`.
 
 When `auto-merge-method` is `ignore-branch-protection`, the workflow first tries to merge the pull request with administrator privileges. The token user, normally `js-soft-ops`, must be allowed to bypass branch protection rules for this to work. If that merge attempt fails, the workflow comments on the pull request with the required fix and enables normal auto-merge as a fallback.

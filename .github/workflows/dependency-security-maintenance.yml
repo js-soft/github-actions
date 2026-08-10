@@ -4,12 +4,12 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: "Node.js version used when node-version-file is empty."
+        description: "Node.js version used when node-version-file is empty or missing."
         required: false
         type: string
         default: "lts/*"
       node-version-file:
-        description: "Path to a Node.js version file. Set to an empty string to use node-version instead."
+        description: "Path to a Node.js version file. Falls back to node-version when empty or missing."
         required: false
         type: string
         default: ".nvmrc"
@@ -68,14 +68,26 @@ jobs:
           ref: main
           path: github-actions-repo
 
+      - name: Check Node.js version file
+        id: node-version-file
+        working-directory: target-repository
+        env:
+          NODE_VERSION_FILE: ${{ inputs['node-version-file'] }}
+        run: |
+          if [ -n "$NODE_VERSION_FILE" ] && [ -f "$NODE_VERSION_FILE" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js from version file
-        if: inputs['node-version-file'] != ''
+        if: steps.node-version-file.outputs.exists == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version-file: target-repository/.nvmrc
+          node-version-file: target-repository/${{ inputs['node-version-file'] }}
 
       - name: Setup Node.js
-        if: inputs['node-version-file'] == ''
+        if: steps.node-version-file.outputs.exists != 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ inputs['node-version'] }}
