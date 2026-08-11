@@ -50,15 +50,13 @@ jobs:
             contents: write
             pull-requests: write
         uses: js-soft/github-actions/.github/workflows/dependency-security-maintenance.yml@main
-        with:
-            auto-merge-method: ignore-branch-protection
         secrets:
             github-token: ${{ secrets.JS_SOFT_OPS_TOKEN }}
 ```
 
 Inputs:
 
-- `auto-merge-method`: controls pull request auto-merge. Allowed values are `off`, `on`, and `ignore-branch-protection`. Defaults to `ignore-branch-protection`.
+- `auto-merge-method`: controls pull request auto-merge. Allowed values are `off` and `on`. Defaults to `on`.
 - `branch-name`: branch name for the generated pull request. Defaults to `handle-vulnerabilities`.
 - `commit-message`: commit message for audit changes. Defaults to `Handle vulnerabilities`.
 - `git-user-email`: Git `user.email` used for the generated commit. Defaults to `ci@js-soft.com`.
@@ -66,8 +64,6 @@ Inputs:
 - `node-version`: Node.js version used when `node-version-file` is empty or missing. Defaults to `lts/*`.
 - `node-version-file`: path to a Node.js version file. Falls back to `node-version` when empty or missing. Defaults to `.nvmrc`.
 - `pull-request-title`: title for the generated pull request. Defaults to `Handle vulnerabilities`.
-
-When `auto-merge-method` is `ignore-branch-protection`, the workflow first tries to merge the pull request with administrator privileges. The token user, normally `js-soft-ops`, must be allowed to bypass branch protection rules for this to work. If that merge attempt fails, the workflow comments on the pull request with the required fix and enables normal auto-merge as a fallback.
 
 ## validate-pr-label
 

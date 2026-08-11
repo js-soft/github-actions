@@ -39,10 +39,10 @@ on:
         type: string
         default: "ci@js-soft.com"
       auto-merge-method:
-        description: "Controls pull request auto-merge: off, on, or ignore-branch-protection."
+        description: "Controls pull request auto-merge: off or on."
         required: false
         type: string
-        default: "ignore-branch-protection"
+        default: "on"
     secrets:
       github-token:
         required: true
@@ -103,10 +103,10 @@ jobs:
           set -euo pipefail
 
           case "$AUTO_MERGE_METHOD" in
-            off|on|ignore-branch-protection)
+            off|on)
               ;;
             *)
-              echo "::error::Invalid auto-merge-method '$AUTO_MERGE_METHOD'. Expected one of: off, on, ignore-branch-protection."
+              echo "::error::Invalid auto-merge-method '$AUTO_MERGE_METHOD'. Expected one of: off, on."
               exit 1
               ;;
           esac
@@ -274,32 +274,8 @@ jobs:
 
           merge_args=("$PR_NUMBER" --squash --subject "$PR_TITLE ($PR_NUMBER)" --body "")
 
-          enable_auto_merge() {
-            gh pr merge "${merge_args[@]}" --auto
-          }
-
           case "$AUTO_MERGE_METHOD" in
             on)
-              enable_auto_merge
-              ;;
-            ignore-branch-protection)
-              force_merge_output="$(mktemp)"
-
-              if gh pr merge "${merge_args[@]}" --admin >"$force_merge_output" 2>&1; then
-                cat "$force_merge_output"
-              else
-                cat "$force_merge_output"
-
-                cat > force-merge-fallback-comment.md <<EOF
-          The attempt to merge this pull request while bypassing branch protection rules failed.
-
-          The most likely cause is that the user behind the workflow token is not allowed to bypass branch protection rules. To fix this, grant the js-soft-ops user permission to bypass the repository's branch protection rules, then rerun the workflow.
-
-          Fallback: normal auto-merge has been enabled for this pull request.
-          EOF
-
-                gh pr comment "$PR_NUMBER" --body-file force-merge-fallback-comment.md
-                enable_auto_merge
-              fi
+              gh pr merge "${merge_args[@]}" --auto
               ;;
           esac
