@@ -38,11 +38,11 @@ on:
         required: false
         type: string
         default: "ci@js-soft.com"
-      auto-merge-method:
-        description: "Controls pull request auto-merge: off or on."
+      enable-auto-merge:
+        description: "Enables pull request auto-merge."
         required: false
-        type: string
-        default: "on"
+        type: boolean
+        default: true
     secrets:
       github-token:
         required: true
@@ -95,21 +95,6 @@ jobs:
       - name: Install github-actions dependencies
         working-directory: github-actions-repo
         run: npm ci
-
-      - name: Validate auto-merge method
-        env:
-          AUTO_MERGE_METHOD: ${{ inputs['auto-merge-method'] }}
-        run: |
-          set -euo pipefail
-
-          case "$AUTO_MERGE_METHOD" in
-            off|on)
-              ;;
-            *)
-              echo "::error::Invalid auto-merge-method '$AUTO_MERGE_METHOD'. Expected one of: off, on."
-              exit 1
-              ;;
-          esac
 
       - name: Handle npm audit
         working-directory: target-repository
@@ -262,20 +247,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Merge pull request
-        if: steps.commit.outputs.has_changes == 'true' && inputs['auto-merge-method'] != 'off'
+        if: steps.commit.outputs.has_changes == 'true' && inputs['enable-auto-merge']
         working-directory: target-repository
         env:
           GH_TOKEN: ${{ secrets['github-token'] }}
-          AUTO_MERGE_METHOD: ${{ inputs['auto-merge-method'] }}
           PR_NUMBER: ${{ steps.pull-request.outputs.number }}
           PR_TITLE: ${{ steps.pull-request.outputs.title }}
         run: |
           set -euo pipefail
 
           merge_args=("$PR_NUMBER" --squash --subject "$PR_TITLE ($PR_NUMBER)" --body "")
-
-          case "$AUTO_MERGE_METHOD" in
-            on)
-              gh pr merge "${merge_args[@]}" --auto
-              ;;
-          esac
+          gh pr merge "${merge_args[@]}" --auto

@@ -56,7 +56,7 @@ jobs:
 
 Inputs:
 
-- `auto-merge-method`: controls pull request auto-merge. Allowed values are `off` and `on`. Defaults to `on`.
+- `enable-auto-merge`: enables pull request auto-merge. Defaults to `true`.
 - `branch-name`: branch name for the generated pull request. Defaults to `handle-vulnerabilities`.
 - `commit-message`: commit message for audit changes. Defaults to `Handle vulnerabilities`.
 - `git-user-email`: Git `user.email` used for the generated commit. Defaults to `ci@js-soft.com`.
