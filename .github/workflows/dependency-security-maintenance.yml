@@ -28,6 +28,11 @@ on:
         required: false
         type: string
         default: "Handle vulnerabilities"
+      reviewers:
+        description: "Comma-separated list of GitHub users or teams to request review from."
+        required: false
+        type: string
+        default: ""
       git-user-name:
         description: "Git user.name used for the generated commit."
         required: false
@@ -187,6 +192,7 @@ jobs:
           GH_TOKEN: ${{ secrets['github-token'] }}
           BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
           PR_TITLE: ${{ inputs['pull-request-title'] }}
+          REVIEWERS: ${{ inputs['reviewers'] }}
           ONLY_NSPRC_CHANGED: ${{ steps.changes.outputs.only_nsprc_changed }}
         run: |
           if [ "$ONLY_NSPRC_CHANGED" = "true" ]; then
@@ -196,6 +202,19 @@ jobs:
             PR_LABEL="dependencies"
             REPLACED_PR_LABEL="chore"
           fi
+
+          reviewers="$(printf "%s" "$REVIEWERS" | tr "\n" "," | awk -v RS=',' '
+            {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+              if ($0 != "") reviewers[++reviewer_count] = $0
+            }
+            END {
+              for (i = 1; i <= reviewer_count; i++) {
+                if (i > 1) printf ","
+                printf "%s", reviewers[i]
+              }
+            }
+          ')"
 
           cat > audit-pr-body.md <<EOF
           This PR was created automatically because npm audit found vulnerabilities.
@@ -227,13 +246,24 @@ jobs:
             if ! printf "%s\n" "$existing_labels" | grep -Fxq "$PR_LABEL"; then
               gh pr edit "$pr_url" --add-label "$PR_LABEL"
             fi
+
+            if [ -n "$reviewers" ]; then
+              gh pr edit "$pr_url" --add-reviewer "$reviewers"
+            fi
           else
-            pr_url=$(gh pr create \
-              --head "$BRANCH_NAME" \
-              --base "${{ github.event.repository.default_branch }}" \
-              --title "$PR_TITLE" \
-              --body-file audit-pr-body.md \
-              --label "$PR_LABEL")
+            create_pr_args=(
+              --head "$BRANCH_NAME"
+              --base "${{ github.event.repository.default_branch }}"
+              --title "$PR_TITLE"
+              --body-file audit-pr-body.md
+              --label "$PR_LABEL"
+            )
+
+            if [ -n "$reviewers" ]; then
+              create_pr_args+=(--reviewer "$reviewers")
+            fi
+
+            pr_url=$(gh pr create "${create_pr_args[@]}")
           fi
 
           pr_number=$(gh pr view "$pr_url" --json number --jq '.number')

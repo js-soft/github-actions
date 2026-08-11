@@ -64,6 +64,7 @@ Inputs:
 - `node-version`: Node.js version used when `node-version-file` is empty or missing. Defaults to `lts/*`.
 - `node-version-file`: path to a Node.js version file. Falls back to `node-version` when empty or missing. Defaults to `.nvmrc`.
 - `pull-request-title`: title for the generated pull request. Defaults to `Handle vulnerabilities`.
+- `reviewers`: comma-separated list of GitHub users or teams to request review from, for example `octocat, js-soft/security`. Defaults to empty.
 
 ## validate-pr-label
 
