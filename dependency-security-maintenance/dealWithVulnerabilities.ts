@@ -29,18 +29,23 @@ type AuditPrTableRow = {
     action: AuditAction
 }
 
+type NpmAuditAdvisoryMetadata = {
+    preferredId: string
+    severity?: string
+}
+
 dealWithVulnerabilities()
 
 function dealWithVulnerabilities(): void {
     const firstAudit = runBetterNpmAudit()
-    const firstAuditSeverities = readNpmAuditSeveritiesById()
     const newVulnerabilityIds = extractUnhandledVulnerabilityIds(firstAudit.output)
     const unusedExceptionIds = extractUnusedExceptionIds(firstAudit.output)
 
     if (firstAudit.status === 0) {
+        const firstAuditMetadata = readNpmAuditAdvisoryMetadataById({ required: Boolean(auditPrTablePath) })
         const { removed } = updateExceptionsInNsprc([], unusedExceptionIds)
         logRemovedExceptions(removed)
-        writeAuditPrTable(removed.map((id) => createAuditPrTableRow(id, "Removed Exception", firstAuditSeverities)))
+        writeAuditPrTable(removed.map((id) => createAuditPrTableRow(id, "Removed Exception", firstAuditMetadata)))
 
         console.log("No new vulnerabilities found.")
         return
@@ -52,20 +57,22 @@ function dealWithVulnerabilities(): void {
 
     console.log(`New vulnerability IDs: ${newVulnerabilityIds.join(",")}`)
 
+    const firstAuditMetadata = readNpmAuditAdvisoryMetadataById({ required: Boolean(auditPrTablePath) })
+
     runNpmAuditFix()
 
     const secondAudit = runBetterNpmAudit()
-    const secondAuditSeverities = readNpmAuditSeveritiesById()
     const remainingVulnerabilityIds = extractUnhandledVulnerabilityIds(secondAudit.output)
     const remainingUnusedExceptionIds = extractUnusedExceptionIds(secondAudit.output)
 
     if (secondAudit.status === 0) {
+        const secondAuditMetadata = readNpmAuditAdvisoryMetadataById({ required: Boolean(auditPrTablePath) })
         const { removed } = updateExceptionsInNsprc([], remainingUnusedExceptionIds)
         logRemovedExceptions(removed)
         writeAuditPrTable([
-            ...newVulnerabilityIds.map((id) => createAuditPrTableRow(id, "Fixed", firstAuditSeverities)),
+            ...newVulnerabilityIds.map((id) => createAuditPrTableRow(id, "Fixed", firstAuditMetadata)),
             ...removed.map((id) =>
-                createAuditPrTableRow(id, "Removed Exception", firstAuditSeverities, secondAuditSeverities)
+                createAuditPrTableRow(id, "Removed Exception", firstAuditMetadata, secondAuditMetadata)
             )
         ])
 
@@ -77,15 +84,15 @@ function dealWithVulnerabilities(): void {
         failUnexpectedAuditResult(secondAudit)
     }
 
-    const { added, removed } = updateExceptionsInNsprc(remainingVulnerabilityIds, remainingUnusedExceptionIds)
+    const secondAuditMetadata = readNpmAuditAdvisoryMetadataById({ required: true })
+    const remainingExceptionIds = getPreferredAdvisoryIds(remainingVulnerabilityIds, secondAuditMetadata)
+    const { added, removed } = updateExceptionsInNsprc(remainingExceptionIds, remainingUnusedExceptionIds)
     const fixedVulnerabilityIds = newVulnerabilityIds.filter((id) => !remainingVulnerabilityIds.includes(id))
 
     writeAuditPrTable([
-        ...fixedVulnerabilityIds.map((id) => createAuditPrTableRow(id, "Fixed", firstAuditSeverities)),
-        ...added.map((id) => createAuditPrTableRow(id, "Added Exception", secondAuditSeverities, firstAuditSeverities)),
-        ...removed.map((id) =>
-            createAuditPrTableRow(id, "Removed Exception", firstAuditSeverities, secondAuditSeverities)
-        )
+        ...fixedVulnerabilityIds.map((id) => createAuditPrTableRow(id, "Fixed", firstAuditMetadata)),
+        ...added.map((id) => createAuditPrTableRow(id, "Added Exception", secondAuditMetadata, firstAuditMetadata)),
+        ...removed.map((id) => createAuditPrTableRow(id, "Removed Exception", firstAuditMetadata, secondAuditMetadata))
     ])
 
     logRemovedExceptions(removed)
@@ -97,8 +104,8 @@ function dealWithVulnerabilities(): void {
     }
 }
 
-function readNpmAuditSeveritiesById(): Map<string, string> {
-    if (!auditPrTablePath) return new Map()
+function readNpmAuditAdvisoryMetadataById({ required }: { required: boolean }): Map<string, NpmAuditAdvisoryMetadata> {
+    if (!required) return new Map()
 
     const result = spawnSync("npm", ["audit", "--json"], {
         encoding: "utf8",
@@ -106,31 +113,31 @@ function readNpmAuditSeveritiesById(): Map<string, string> {
     })
 
     if (result.error) {
-        console.warn(`Unable to read npm audit severities: ${result.error.message}`)
+        console.warn(`Unable to read npm audit advisory metadata: ${result.error.message}`)
         return new Map()
     }
 
     if (!result.stdout) {
         if (result.status && result.status > 1) {
-            console.warn("Unable to read npm audit severities: npm audit did not return JSON output.")
+            console.warn("Unable to read npm audit advisory metadata: npm audit did not return JSON output.")
         }
 
         return new Map()
     }
 
     try {
-        return extractNpmAuditSeverities(JSON.parse(result.stdout))
+        return extractNpmAuditAdvisoryMetadata(JSON.parse(result.stdout))
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        console.warn(`Unable to parse npm audit severities: ${message}`)
+        console.warn(`Unable to parse npm audit advisory metadata: ${message}`)
         return new Map()
     }
 }
 
-function extractNpmAuditSeverities(auditReport: unknown): Map<string, string> {
-    const severitiesById = new Map<string, string>()
+function extractNpmAuditAdvisoryMetadata(auditReport: unknown): Map<string, NpmAuditAdvisoryMetadata> {
+    const metadataById = new Map<string, NpmAuditAdvisoryMetadata>()
 
-    if (!isRecord(auditReport) || !isRecord(auditReport.vulnerabilities)) return severitiesById
+    if (!isRecord(auditReport) || !isRecord(auditReport.vulnerabilities)) return metadataById
 
     for (const vulnerability of Object.values(auditReport.vulnerabilities)) {
         if (!isRecord(vulnerability)) continue
@@ -142,15 +149,18 @@ function extractNpmAuditSeverities(auditReport: unknown): Map<string, string> {
             if (!isRecord(advisory)) continue
 
             const severity = normalizeSeverity(advisory.severity) ?? fallbackSeverity
-            if (!severity) continue
+            const advisoryIds = extractAdvisoryIds(advisory)
+            if (!advisoryIds.length) continue
 
-            for (const id of extractAdvisoryIds(advisory)) {
-                setHighestSeverity(severitiesById, id, severity)
+            const preferredId = getPreferredAdvisoryId(advisoryIds)
+
+            for (const id of advisoryIds) {
+                setNpmAuditAdvisoryMetadata(metadataById, id, preferredId, severity)
             }
         }
     }
 
-    return severitiesById
+    return metadataById
 }
 
 function extractAdvisoryIds(advisory: Record<string, unknown>): string[] {
@@ -165,12 +175,42 @@ function extractAdvisoryIds(advisory: Record<string, unknown>): string[] {
     return Array.from(new Set(ids))
 }
 
-function setHighestSeverity(severitiesById: Map<string, string>, id: string, severity: string): void {
-    const existingSeverity = severitiesById.get(id)
+function getPreferredAdvisoryIds(ids: string[], metadataById: Map<string, NpmAuditAdvisoryMetadata>): string[] {
+    return Array.from(new Set(ids.map((id) => metadataById.get(id)?.preferredId ?? id))).sort()
+}
 
-    if (!existingSeverity || getSeverityRank(severity) > getSeverityRank(existingSeverity)) {
-        severitiesById.set(id, severity)
-    }
+function getPreferredAdvisoryId(ids: string[]): string {
+    return ids.find(isGithubAdvisoryId) ?? ids[0]
+}
+
+function isGithubAdvisoryId(id: string): boolean {
+    return /^GHSA-[a-z0-9-]+$/i.test(id)
+}
+
+function setNpmAuditAdvisoryMetadata(
+    metadataById: Map<string, NpmAuditAdvisoryMetadata>,
+    id: string,
+    preferredId: string,
+    severity: string | undefined
+): void {
+    const existingMetadata = metadataById.get(id)
+    const preferredMetadataId =
+        existingMetadata && isGithubAdvisoryId(existingMetadata.preferredId)
+            ? existingMetadata.preferredId
+            : preferredId
+    const highestSeverity = getHighestSeverity(existingMetadata?.severity, severity)
+
+    metadataById.set(id, {
+        preferredId: preferredMetadataId,
+        ...(highestSeverity ? { severity: highestSeverity } : {})
+    })
+}
+
+function getHighestSeverity(left: string | undefined, right: string | undefined): string | undefined {
+    if (!left) return right
+    if (!right) return left
+
+    return getSeverityRank(right) > getSeverityRank(left) ? right : left
 }
 
 function getSeverityRank(severity: string): number {
@@ -354,18 +394,18 @@ function writeAuditPrTable(rows: AuditPrTableRow[]): void {
 function createAuditPrTableRow(
     advisoryId: string,
     action: AuditAction,
-    ...severityMaps: Map<string, string>[]
+    ...metadataMaps: Map<string, NpmAuditAdvisoryMetadata>[]
 ): AuditPrTableRow {
     return {
         advisoryId,
-        severity: getAdvisorySeverity(advisoryId, severityMaps),
+        severity: getAdvisorySeverity(advisoryId, metadataMaps),
         action
     }
 }
 
-function getAdvisorySeverity(advisoryId: string, severityMaps: Map<string, string>[]): string {
-    for (const severityMap of severityMaps) {
-        const severity = severityMap.get(advisoryId)
+function getAdvisorySeverity(advisoryId: string, metadataMaps: Map<string, NpmAuditAdvisoryMetadata>[]): string {
+    for (const metadataMap of metadataMaps) {
+        const severity = metadataMap.get(advisoryId)?.severity
         if (severity) return severity
     }
 
