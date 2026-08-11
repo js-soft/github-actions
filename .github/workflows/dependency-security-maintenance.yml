@@ -32,7 +32,7 @@ on:
         description: "Comma-separated list of GitHub users or teams to request review from."
         required: false
         type: string
-        default: ""
+        default: "js-soft/npm-dependency-update-reviewers"
       git-user-name:
         description: "Git user.name used for the generated commit."
         required: false
