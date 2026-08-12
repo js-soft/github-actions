@@ -76,6 +76,9 @@ accepted labels are `breaking-change`, `bug`, `chore`, `ci`, `dependencies`,
 jobs:
     validate-pr-label:
         runs-on: ubuntu-latest
+        permissions:
+            issues: read
+            pull-requests: read
         steps:
             - uses: js-soft/github-actions/validate-pr-label@main
 ```
@@ -83,3 +86,9 @@ jobs:
 Inputs:
 
 - `valid-labels`: comma-separated list of labels that are accepted for pull requests. Defaults to `breaking-change, bug, chore, ci, dependencies, documentation, enhancement, refactoring, test`.
+- `github-token`: GitHub token used to read pull request labels when the action runs for a `merge_group` event. Defaults to `${{ github.token }}`.
+
+When using this action as a required check for a branch with a merge queue, add
+`merge_group` to the workflow triggers. The action reads labels from the
+`pull_request` event payload for regular pull request runs and from the GitHub
+API for merge queue runs.
