@@ -6,6 +6,9 @@ inputs:
     description: Comma-separated list of labels that are accepted for pull requests.
     required: false
     default: breaking-change, bug, chore, ci, dependencies, documentation, enhancement, refactoring, test
+  github-token:
+    description: GitHub token used to read pull request labels when the action runs for a merge_group event.
+    required: false
 
 runs:
   using: composite
@@ -14,6 +17,10 @@ runs:
       shell: bash
       env:
         VALID_LABELS: ${{ inputs.valid-labels }}
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+        ACTION_EVENT_NAME: ${{ github.event_name }}
+        ACTION_REF_NAME: ${{ github.ref_name }}
+        ACTION_REPOSITORY: ${{ github.repository }}
         EVENT_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
       run: |
         set -euo pipefail
@@ -25,7 +32,29 @@ runs:
           printf '%s' "$value"
         }
 
+        get_labels_from_merge_group() {
+          local queue_ref="$1"
+
+          if [[ ! "$queue_ref" =~ pr-([0-9]+)- ]]; then
+            echo "::error::Could not determine the pull request number from merge queue ref '$queue_ref'."
+            exit 1
+          fi
+
+          local pr_number="${BASH_REMATCH[1]}"
+
+          if [ -z "$(trim "${GH_TOKEN:-}")" ]; then
+            echo "::error::A GitHub token is required to validate pull request labels for merge_group events."
+            exit 1
+          fi
+
+          gh api "repos/$ACTION_REPOSITORY/issues/$pr_number" --jq '.labels[].name' | paste -sd, -
+        }
+
         labels="$EVENT_LABELS"
+
+        if [ "$ACTION_EVENT_NAME" = "merge_group" ]; then
+          labels="$(get_labels_from_merge_group "$ACTION_REF_NAME")"
+        fi
 
         if [ -z "$(trim "$labels")" ]; then
           echo "::error::The pull request must have one of these labels: $VALID_LABELS"
