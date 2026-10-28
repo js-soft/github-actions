@@ -14,7 +14,7 @@
         "@actions/github": "^9.1.1"
     },
     "devDependencies": {
-        "@octokit/plugin-rest-endpoint-methods": "17.0.0",
+        "@octokit/plugin-rest-endpoint-methods": "18.0.0",
         "@types/node": "26.6.5",
         "prettier": "3.9.10",
         "tsx": "4.23.15",
